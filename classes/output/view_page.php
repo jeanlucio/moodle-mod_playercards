@@ -29,22 +29,33 @@ use renderer_base;
 use templatable;
 
 /**
- * Fase 2 placeholder page: shows the intro and a static message. The real interactive
- * board (SCOPE.md 16, Fase 3) replaces this template's body once built — the intro
- * rendering and onboarding wiring set up here stay unchanged.
+ * Renders the intro plus the board container amd/src/board.js takes over (SCOPE.md 16,
+ * Fase 3). The board's own markup is built entirely client-side from match state — this
+ * template only provides the mount point and the data attributes board.js needs to call
+ * the Web services (course module id, the instance's default AI difficulty).
  */
 class view_page implements renderable, templatable {
     /** @var string Formatted activity introduction, already passed through format_module_intro(). */
     private readonly string $intro;
+
+    /** @var int Course module id. */
+    private readonly int $cmid;
+
+    /** @var string Instance's configured default AI difficulty (easy | normal | hard). */
+    private readonly string $aidifficultydefault;
 
     /**
      * Creates the renderable.
      *
      * @param string $intro Formatted activity introduction, already passed through
      *  format_module_intro().
+     * @param int $cmid Course module id.
+     * @param string $aidifficultydefault Instance's configured default AI difficulty.
      */
-    public function __construct(string $intro) {
+    public function __construct(string $intro, int $cmid, string $aidifficultydefault) {
         $this->intro = $intro;
+        $this->cmid = $cmid;
+        $this->aidifficultydefault = $aidifficultydefault;
     }
 
     /**
@@ -57,6 +68,8 @@ class view_page implements renderable, templatable {
         return [
             'intro' => $this->intro,
             'hasintro' => $this->intro !== '',
+            'cmid' => $this->cmid,
+            'aidifficultydefault' => $this->aidifficultydefault,
         ];
     }
 }

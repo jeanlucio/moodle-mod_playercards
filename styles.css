@@ -38,6 +38,57 @@
     margin-block-end: 1rem;
 }
 
-.path-mod-playercards .playercards-placeholder {
+.path-mod-playercards .playercards-board {
     margin-block-end: 1rem;
+}
+
+.path-mod-playercards .playercards-lobby,
+.path-mod-playercards .playercards-mulligan {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    max-width: 24rem;
+}
+
+.path-mod-playercards .playercards-status-bar,
+.path-mod-playercards .playercards-lp-row {
+    display: flex;
+    justify-content: space-between;
+    margin-block-end: 0.5rem;
+}
+
+.path-mod-playercards .playercards-zone {
+    border: 1px solid var(--card-border-color, #ccc);
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    margin-block-end: 0.5rem;
+}
+
+.path-mod-playercards .playercards-slots,
+.path-mod-playercards .playercards-hand {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block-end: 0.5rem;
+}
+
+.path-mod-playercards .playercards-slot {
+    width: 5rem;
+    height: 6.5rem;
+    border: 1px dashed var(--card-border-color, #999);
+    border-radius: 0.25rem;
+}
+
+.path-mod-playercards .playercards-card {
+    width: 8rem;
+    min-height: 6.5rem;
+    border: 1px solid var(--card-border-color, #666);
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    background: var(--card-bg, #fff);
+}
+
+.path-mod-playercards .playercards-card-name {
+    font-weight: bold;
 }

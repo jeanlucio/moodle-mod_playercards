@@ -17,13 +17,15 @@
 {{!
     @template mod_playercards/view
 
-    PlayerCards main activity page (Fase 2 placeholder — the interactive board arrives in
-    Fase 3, SCOPE.md 16).
+    PlayerCards main activity page (SCOPE.md 16, Fase 3). The board container is an empty
+    mount point — amd/src/board.js renders its actual contents from match state.
 
     Example context (json):
     {
         "intro": "<p>Duel an AI opponent to review course content.</p>",
-        "hasintro": true
+        "hasintro": true,
+        "cmid": 42,
+        "aidifficultydefault": "normal"
     }
 }}
 <div class="path-mod-playercards">
@@ -31,9 +33,7 @@
         <div class="playercards-intro">{{{intro}}}</div>
     {{/hasintro}}
 
-    <div class="alert alert-info playercards-placeholder">
-        {{#str}} boardcomingsoon, mod_playercards {{/str}}
-    </div>
+    <div id="playercards-board" class="playercards-board" data-cmid="{{cmid}}"></div>
 
     <button type="button" class="btn btn-secondary" id="playercards-howtoplay-btn">
         {{#str}} howtoplay, mod_playercards {{/str}}

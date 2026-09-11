@@ -17,8 +17,9 @@
 /**
  * External function definitions for mod_playercards.
  *
- * Only mark_intro_seen exists so far (Fase 2, SCOPE.md 16) — the 16 gameplay/content
- * endpoints from SCOPE.md 7 are added here in Fase 3/4.
+ * mark_intro_seen was added in Fase 2. start_match/mulligan/get_state are the first 3 of
+ * the 16 gameplay/content endpoints from SCOPE.md 7 (Fase 3, Etapa 1) — the remaining
+ * ones are added across the rest of Fase 3/4.
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -32,6 +33,30 @@ $functions = [
         'classname'     => 'mod_playercards\external\mark_intro_seen',
         'description'   => 'Marks the automatic how-to-play intro as seen for the current user.',
         'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_start_match' => [
+        'classname'     => 'mod_playercards\external\start_match',
+        'description'   => 'Starts a new match vs. the AI with the student\'s active deck.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_mulligan' => [
+        'classname'     => 'mod_playercards\external\mulligan',
+        'description'   => 'Resolves the once-only mulligan decision and starts turn 1.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_get_state' => [
+        'classname'     => 'mod_playercards\external\get_state',
+        'description'   => 'Reads the current match state.',
+        'type'          => 'read',
         'ajax'          => true,
         'capabilities'  => 'mod/playercards:view',
         'loginrequired' => true,

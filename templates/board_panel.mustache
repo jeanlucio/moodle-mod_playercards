@@ -1,0 +1,149 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_playercards/board_panel
+
+    Renders the PlayerCards board in one of three states: no match in progress (lobby),
+    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapa 1). Every
+    boolean/list here is pre-computed client-side by amd/src/board.js from the raw
+    start_match/mulligan/get_state Web Service response — this template stays logic-less.
+
+    Example context (json):
+    {
+        "showlobby": false,
+        "showmulligan": true,
+        "showmain": false,
+        "difficulties": [
+            {"value": "easy", "label": "Easy", "selected": false},
+            {"value": "normal", "label": "Normal", "selected": true},
+            {"value": "hard", "label": "Hard", "selected": false}
+        ],
+        "cointossmessage": "You won the coin toss and go first.",
+        "turnlabel": "Turn 1",
+        "activeplayerlabel": "Your turn",
+        "humanlp": 10000,
+        "ailp": 10000,
+        "aihandcount": 5,
+        "humandeckcount": 35,
+        "aideckcount": 20,
+        "hand": [
+            {"uid": "h1", "isguardian": true, "name": "Sentinela Novata", "atk": 400, "def": 0, "level": 1},
+            {"uid": "h2", "isguardian": false, "name": "Fragmento de Sabedoria", "subtypelabel": "Info"}
+        ],
+        "guardianslotlabel": "Empty Guardian slot",
+        "loreslotlabel": "Empty Lore slot",
+        "fieldslots": [1, 2, 3, 4, 5]
+    }
+}}
+{{#showlobby}}
+    <div class="playercards-lobby">
+        <div class="form-group">
+            <label for="playercards-difficulty-select">{{#str}} selectdifficulty, mod_playercards {{/str}}</label>
+            <select id="playercards-difficulty-select" class="form-select">
+                {{#difficulties}}
+                    <option value="{{value}}" {{#selected}}selected{{/selected}}>{{label}}</option>
+                {{/difficulties}}
+            </select>
+        </div>
+        <button type="button" class="btn btn-primary" id="playercards-startmatch-btn">
+            {{#str}} startmatch, mod_playercards {{/str}}
+        </button>
+    </div>
+{{/showlobby}}
+{{#showmulligan}}
+    <div class="playercards-mulligan">
+        <p class="playercards-cointoss">{{cointossmessage}}</p>
+        <div class="playercards-hand" role="list" aria-label="{{#str}} yourhand, mod_playercards {{/str}}">
+            {{#hand}}
+                <div class="playercards-card" role="listitem" data-uid="{{uid}}">
+                    <div class="playercards-card-name">{{name}}</div>
+                    {{#isguardian}}
+                        <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}} (Lv.{{level}})</div>
+                    {{/isguardian}}
+                    {{^isguardian}}
+                        <div class="playercards-card-subtype">{{subtypelabel}}</div>
+                    {{/isguardian}}
+                </div>
+            {{/hand}}
+        </div>
+        <button type="button" class="btn btn-primary" id="playercards-keephand-btn">
+            {{#str}} keephand, mod_playercards {{/str}}
+        </button>
+        <button type="button" class="btn btn-secondary" id="playercards-redrawhand-btn">
+            {{#str}} redrawhand, mod_playercards {{/str}}
+        </button>
+    </div>
+{{/showmulligan}}
+{{#showmain}}
+    <div class="playercards-board-main">
+        <div class="playercards-status-bar">
+            <span class="playercards-turnlabel">{{turnlabel}}</span>
+            <span class="playercards-activeplayer">{{activeplayerlabel}}</span>
+        </div>
+        <div class="playercards-lp-row">
+            <span class="playercards-lp playercards-lp-ai">{{#str}} lifepoints, mod_playercards {{/str}}: {{ailp}}</span>
+            <span class="playercards-lp playercards-lp-human">{{#str}} lifepoints, mod_playercards {{/str}}: {{humanlp}}</span>
+        </div>
+
+        <div class="playercards-zone playercards-zone-ai">
+            <div class="playercards-zone-label">{{#str}} opponenthand, mod_playercards {{/str}} ({{aihandcount}})</div>
+            <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
+                {{#fieldslots}}
+                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{guardianslotlabel}}"></div>
+                {{/fieldslots}}
+            </div>
+            <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
+                {{#fieldslots}}
+                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{loreslotlabel}}"></div>
+                {{/fieldslots}}
+            </div>
+            <div class="playercards-deckcount">{{aideckcount}}</div>
+        </div>
+
+        <p class="alert alert-info playercards-actions-note">
+            {{#str}} actionscomingsoon, mod_playercards {{/str}}
+        </p>
+
+        <div class="playercards-zone playercards-zone-human">
+            <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
+                {{#fieldslots}}
+                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{loreslotlabel}}"></div>
+                {{/fieldslots}}
+            </div>
+            <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
+                {{#fieldslots}}
+                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{guardianslotlabel}}"></div>
+                {{/fieldslots}}
+            </div>
+            <div class="playercards-deckcount">{{humandeckcount}}</div>
+            <div class="playercards-zone-label">{{#str}} yourhand, mod_playercards {{/str}}</div>
+            <div class="playercards-hand" role="list" aria-label="{{#str}} yourhand, mod_playercards {{/str}}">
+                {{#hand}}
+                    <div class="playercards-card" role="listitem" data-uid="{{uid}}">
+                        <div class="playercards-card-name">{{name}}</div>
+                        {{#isguardian}}
+                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}} (Lv.{{level}})</div>
+                        {{/isguardian}}
+                        {{^isguardian}}
+                            <div class="playercards-card-subtype">{{subtypelabel}}</div>
+                        {{/isguardian}}
+                    </div>
+                {{/hand}}
+            </div>
+        </div>
+    </div>
+{{/showmain}}

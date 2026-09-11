@@ -17,8 +17,8 @@
 /**
  * View a playercards instance.
  *
- * Fase 2 placeholder (SCOPE.md 16): renders the intro and the how-to-play onboarding.
- * The interactive board arrives in Fase 3.
+ * Renders the intro, the how-to-play onboarding, and the board container that
+ * amd/src/board.js takes over (SCOPE.md 16, Fase 3).
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -60,10 +60,15 @@ $PAGE->requires->js_call_amd('mod_playercards/intro', 'init', [
     (int) $cm->id,
     !intro_service::has_seen_intro((int) $USER->id),
 ]);
+$PAGE->requires->js_call_amd('mod_playercards/board', 'init', [
+    (int) $cm->id,
+    $instance->aidifficultydefault,
+]);
 
 $intro = $instance->intro !== '' ? format_module_intro('playercards', $instance, $cm->id) : '';
-$page = new view_page($intro);
+$page = new view_page($intro, (int) $cm->id, $instance->aidifficultydefault);
+$renderer = $PAGE->get_renderer('mod_playercards');
 
 echo $OUTPUT->header();
-echo $OUTPUT->render($page);
+echo $renderer->render($page);
 echo $OUTPUT->footer();

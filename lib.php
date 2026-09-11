@@ -130,13 +130,14 @@ function playercards_grade_item_update(stdClass $instance, mixed $grades = null)
         'idnumber' => $instance->cmidnumber ?? '',
     ];
 
-    if ((int) $instance->grade > 0) {
+    $grade = (int) ($instance->grade ?? 0);
+    if ($grade > 0) {
         $params['gradetype'] = GRADE_TYPE_VALUE;
-        $params['grademax']  = (float) $instance->grade;
+        $params['grademax']  = (float) $grade;
         $params['grademin']  = 0.0;
-    } else if ((int) $instance->grade < 0) {
+    } else if ($grade < 0) {
         $params['gradetype'] = GRADE_TYPE_SCALE;
-        $params['scaleid']   = -(int) $instance->grade;
+        $params['scaleid']   = -$grade;
     } else {
         $params['gradetype'] = GRADE_TYPE_NONE;
     }
