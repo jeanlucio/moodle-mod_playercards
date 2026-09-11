@@ -70,7 +70,7 @@ class get_state extends external_api {
 
         $state = match_service::get_state($cmid, (int) $USER->id, $token !== '' ? $token : null);
 
-        return match_structures::fill_empty_slots(match_service::export_state($state));
+        return match_service::export_state($state);
     }
 
     /**

@@ -85,4 +85,100 @@ class card_presenter {
 
         return $result;
     }
+
+    /**
+     * Hydrates every field/Lore zone slot (as stored in match state: null, or a raw
+     * ['uid', 'cardtype', 'cardid', 'posture'?, 'facedown'?, ...] entry) into the full
+     * slot_structure() shape the Web service response needs, batching every guardian/lore
+     * lookup across all given zones into a single pair of queries.
+     *
+     * @param array $zones Zone name => list of (null|array) raw slots, e.g.
+     *  ['humanfield' => [...], 'humanlore' => [...], 'aifield' => [...], 'ailore' => [...]].
+     * @return array Same zone names, each an array of slot_structure()-shaped entries.
+     */
+    public static function hydrate_zones(array $zones): array {
+        global $DB;
+
+        $guardianids = [];
+        $loreids = [];
+        foreach ($zones as $slots) {
+            foreach ($slots as $slot) {
+                if ($slot === null) {
+                    continue;
+                }
+                if ($slot['cardtype'] === 'guardian') {
+                    $guardianids[] = $slot['cardid'];
+                } else {
+                    $loreids[] = $slot['cardid'];
+                }
+            }
+        }
+
+        $guardians = $guardianids !== []
+            ? $DB->get_records_list('playercards_guardians', 'id', array_unique($guardianids))
+            : [];
+        $lorecards = $loreids !== []
+            ? $DB->get_records_list('playercards_lore', 'id', array_unique($loreids))
+            : [];
+
+        $emptyslot = [
+            'occupied' => false,
+            'uid' => '',
+            'cardtype' => '',
+            'cardid' => 0,
+            'name' => '',
+            'level' => 0,
+            'atk' => 0,
+            'def' => 0,
+            'subtype' => '',
+            'posture' => '',
+            'facedown' => false,
+            'sick' => false,
+            'attackedthisturn' => false,
+        ];
+
+        $result = [];
+        foreach ($zones as $zonename => $slots) {
+            $hydrated = [];
+            foreach ($slots as $slot) {
+                if ($slot === null) {
+                    $hydrated[] = $emptyslot;
+                    continue;
+                }
+
+                $facedown = (bool) ($slot['facedown'] ?? false);
+
+                if ($slot['cardtype'] === 'guardian') {
+                    $card = $guardians[$slot['cardid']] ?? null;
+                    $hydrated[] = array_merge($emptyslot, [
+                        'occupied' => true,
+                        'uid' => $slot['uid'],
+                        'cardtype' => 'guardian',
+                        'cardid' => (int) $slot['cardid'],
+                        'name' => $card !== null ? format_string($card->name) : '',
+                        'level' => $card !== null ? (int) $card->level : 0,
+                        'atk' => $card !== null ? (int) $card->atk : 0,
+                        'def' => $card !== null ? (int) $card->def : 0,
+                        'posture' => $slot['posture'] ?? '',
+                        'sick' => (bool) ($slot['sick'] ?? false),
+                        'attackedthisturn' => (bool) ($slot['attackedthisturn'] ?? false),
+                    ]);
+                } else {
+                    $card = $lorecards[$slot['cardid']] ?? null;
+                    $hydrated[] = array_merge($emptyslot, [
+                        'occupied' => true,
+                        'uid' => $slot['uid'],
+                        'cardtype' => 'lore',
+                        'cardid' => (int) $slot['cardid'],
+                        'name' => $facedown || $card === null ? '' : format_string($card->name),
+                        'subtype' => $facedown || $card === null ? '' : $card->subtype,
+                        'facedown' => $facedown,
+                    ]);
+                }
+            }
+            $result[$zonename] = $hydrated;
+        }
+
+        return $result;
+    }
 }

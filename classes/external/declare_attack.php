@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * External function: start a new match vs. the AI.
+ * External function: declare a Guardian attack.
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -32,9 +32,11 @@ use core_external\external_value;
 use mod_playercards\local\match_service;
 
 /**
- * Starts a new match, discarding any previous one for this user/course module.
+ * Declares an attack from one own Guardian in Offensive posture (SCOPE.md 4.5) against
+ * an opposing field slot, or directly against the AI's life points when its field is
+ * empty.
  */
-class start_match extends external_api {
+class declare_attack extends external_api {
     /**
      * Returns parameter definitions for execute().
      *
@@ -43,33 +45,50 @@ class start_match extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'cmid' => new external_value(PARAM_INT, 'Course module id'),
-            'difficulty' => new external_value(PARAM_ALPHA, 'easy | normal | hard'),
+            'token' => new external_value(PARAM_ALPHANUMEXT, 'Match token'),
+            'attackerslot' => new external_value(PARAM_INT, 'Own field slot declaring the attack, 0-4'),
+            'targetslot' => new external_value(
+                PARAM_INT,
+                'Opposing field slot to attack, or -1 for a direct attack',
+                VALUE_DEFAULT,
+                -1
+            ),
         ]);
     }
 
     /**
-     * Starts a new match for the current user.
+     * Declares an attack for the current user.
      *
      * @param int $cmid Course module id.
-     * @param string $difficulty easy | normal | hard.
+     * @param string $token Match token.
+     * @param int $attackerslot Own field slot declaring the attack, 0-4.
+     * @param int $targetslot Opposing field slot, or -1 for a direct attack.
      * @return array Match state.
      */
-    public static function execute(int $cmid, string $difficulty): array {
-        global $DB, $USER;
+    public static function execute(int $cmid, string $token, int $attackerslot, int $targetslot = -1): array {
+        global $USER;
 
-        ['cmid' => $cmid, 'difficulty' => $difficulty] = self::validate_parameters(
-            self::execute_parameters(),
-            ['cmid' => $cmid, 'difficulty' => $difficulty]
-        );
+        $params = self::validate_parameters(self::execute_parameters(), [
+            'cmid' => $cmid,
+            'token' => $token,
+            'attackerslot' => $attackerslot,
+            'targetslot' => $targetslot,
+        ]);
 
-        $cm = get_coursemodule_from_id('playercards', $cmid, 0, false, MUST_EXIST);
+        $cm = get_coursemodule_from_id('playercards', $params['cmid'], 0, false, MUST_EXIST);
         $context = context_module::instance($cm->id);
         self::validate_context($context);
         require_capability('mod/playercards:view', $context);
 
-        $instance = $DB->get_record('playercards', ['id' => $cm->instance], '*', MUST_EXIST);
+        $target = $params['targetslot'] >= 0 ? $params['targetslot'] : null;
 
-        $state = match_service::start_match($instance, $cmid, (int) $USER->id, $difficulty);
+        $state = match_service::declare_attack(
+            $params['cmid'],
+            (int) $USER->id,
+            $params['token'],
+            $params['attackerslot'],
+            $target
+        );
 
         return match_service::export_state($state);
     }

@@ -72,7 +72,7 @@ class mulligan extends external_api {
 
         $state = match_service::mulligan($cmid, (int) $USER->id, $token, $keep);
 
-        return match_structures::fill_empty_slots(match_service::export_state($state));
+        return match_service::export_state($state);
     }
 
     /**

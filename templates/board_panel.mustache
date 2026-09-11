@@ -18,9 +18,12 @@
     @template mod_playercards/board_panel
 
     Renders the PlayerCards board in one of three states: no match in progress (lobby),
-    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapa 1). Every
+    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapas 1-2). Every
     boolean/list here is pre-computed client-side by amd/src/board.js from the raw
-    start_match/mulligan/get_state Web Service response — this template stays logic-less.
+    start_match/mulligan/get_state/muster_guardian/change_posture/declare_attack Web
+    Service response — this template stays logic-less. The contextual action bar
+    (posture choice during a muster, attack/change-posture/cancel buttons for a selected
+    Guardian) is built entirely in JS into #playercards-actionbar, not templated here.
 
     Example context (json):
     {
@@ -46,7 +49,21 @@
         ],
         "guardianslotlabel": "Empty Guardian slot",
         "loreslotlabel": "Empty Lore slot",
-        "fieldslots": [1, 2, 3, 4, 5]
+        "fieldslots": [1, 2, 3, 4, 5],
+        "aislots": [
+            {"index": 0, "occupied": false},
+            {
+                "index": 1, "occupied": true, "name": "Golem de Aço", "atk": 400, "def": 1200,
+                "posturelabel": "Attack posture", "sicklabel": ""
+            }
+        ],
+        "humanslots": [
+            {"index": 0, "occupied": false},
+            {
+                "index": 1, "occupied": true, "name": "Sentinela Novata", "atk": 400, "def": 0,
+                "posturelabel": "Defense posture", "sicklabel": "Summoned this turn"
+            }
+        ]
     }
 }}
 {{#showlobby}}
@@ -102,9 +119,22 @@
         <div class="playercards-zone playercards-zone-ai">
             <div class="playercards-zone-label">{{#str}} opponenthand, mod_playercards {{/str}} ({{aihandcount}})</div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
-                {{#fieldslots}}
-                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{guardianslotlabel}}"></div>
-                {{/fieldslots}}
+                {{#aislots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-guardian{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="ai"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../guardianslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            <div class="playercards-card-name">{{name}}</div>
+                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
+                            <div class="playercards-card-posture">{{posturelabel}}</div>
+                            {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
+                        {{/occupied}}
+                    </div>
+                {{/aislots}}
             </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
                 {{#fieldslots}}
@@ -114,9 +144,7 @@
             <div class="playercards-deckcount">{{aideckcount}}</div>
         </div>
 
-        <p class="alert alert-info playercards-actions-note">
-            {{#str}} actionscomingsoon, mod_playercards {{/str}}
-        </p>
+        <div id="playercards-actionbar" class="playercards-actionbar"></div>
 
         <div class="playercards-zone playercards-zone-human">
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
@@ -125,9 +153,22 @@
                 {{/fieldslots}}
             </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
-                {{#fieldslots}}
-                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{guardianslotlabel}}"></div>
-                {{/fieldslots}}
+                {{#humanslots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-guardian{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="human"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../guardianslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            <div class="playercards-card-name">{{name}}</div>
+                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
+                            <div class="playercards-card-posture">{{posturelabel}}</div>
+                            {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
+                        {{/occupied}}
+                    </div>
+                {{/humanslots}}
             </div>
             <div class="playercards-deckcount">{{humandeckcount}}</div>
             <div class="playercards-zone-label">{{#str}} yourhand, mod_playercards {{/str}}</div>

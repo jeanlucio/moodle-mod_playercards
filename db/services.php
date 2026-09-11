@@ -17,9 +17,10 @@
 /**
  * External function definitions for mod_playercards.
  *
- * mark_intro_seen was added in Fase 2. start_match/mulligan/get_state are the first 3 of
- * the 16 gameplay/content endpoints from SCOPE.md 7 (Fase 3, Etapa 1) — the remaining
- * ones are added across the rest of Fase 3/4.
+ * mark_intro_seen was added in Fase 2. start_match/mulligan/get_state (Etapa 1) and
+ * muster_guardian/change_posture/declare_attack (Etapa 2) cover 6 of the 16 gameplay/
+ * content endpoints from SCOPE.md 7 — the remaining ones are added across the rest of
+ * Fase 3/4.
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -57,6 +58,30 @@ $functions = [
         'classname'     => 'mod_playercards\external\get_state',
         'description'   => 'Reads the current match state.',
         'type'          => 'read',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_muster_guardian' => [
+        'classname'     => 'mod_playercards\external\muster_guardian',
+        'description'   => 'Musters a Guardian from hand, normal or by sacrifice.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_change_posture' => [
+        'classname'     => 'mod_playercards\external\change_posture',
+        'description'   => 'Changes the posture of a Guardian already in play.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_declare_attack' => [
+        'classname'     => 'mod_playercards\external\declare_attack',
+        'description'   => 'Declares an attack from one own Guardian.',
+        'type'          => 'write',
         'ajax'          => true,
         'capabilities'  => 'mod/playercards:view',
         'loginrequired' => true,

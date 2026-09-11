@@ -75,6 +75,18 @@ class match_structures {
             'subtype' => new external_value(PARAM_ALPHA, 'info | quiz | trap', VALUE_DEFAULT, ''),
             'posture' => new external_value(PARAM_ALPHA, 'attack | defense, Guardian slots only', VALUE_DEFAULT, ''),
             'facedown' => new external_value(PARAM_BOOL, 'Whether a Lore slot is still hidden', VALUE_DEFAULT, false),
+            'sick' => new external_value(
+                PARAM_BOOL,
+                'Whether this Guardian was mustered this turn and cannot attack yet',
+                VALUE_DEFAULT,
+                false
+            ),
+            'attackedthisturn' => new external_value(
+                PARAM_BOOL,
+                'Whether this Guardian has already declared an attack this turn',
+                VALUE_DEFAULT,
+                false
+            ),
         ]);
     }
 
@@ -92,6 +104,18 @@ class match_structures {
             'firstplayer' => new external_value(PARAM_ALPHA, 'human | ai', VALUE_DEFAULT, ''),
             'activeplayer' => new external_value(PARAM_ALPHA, 'human | ai', VALUE_DEFAULT, ''),
             'turnnumber' => new external_value(PARAM_INT, 'Current turn number, 0 during mulligan', VALUE_DEFAULT, 0),
+            'musterusedthisturn' => new external_value(
+                PARAM_BOOL,
+                'Whether the active player already mustered a Guardian this turn',
+                VALUE_DEFAULT,
+                false
+            ),
+            'postureusedthisturn' => new external_value(
+                PARAM_BOOL,
+                'Whether the active player already changed a Guardian\'s posture this turn',
+                VALUE_DEFAULT,
+                false
+            ),
             'lifepoints' => new external_single_structure(
                 [
                     'human' => new external_value(PARAM_INT, 'Human player life points'),
@@ -115,29 +139,5 @@ class match_structures {
             'aifield' => new external_multiple_structure(self::slot_structure(), 'AI Guardian slots', VALUE_DEFAULT, []),
             'ailore' => new external_multiple_structure(self::slot_structure(), 'AI Lore slots', VALUE_DEFAULT, []),
         ]);
-    }
-
-    /**
-     * Fills in the slot fields export_state() leaves as plain null, so the array matches
-     * match_state_structure() exactly regardless of how many keys a real occupied slot
-     * will eventually carry (Etapa 2/3).
-     *
-     * @param array $state Match state as returned by match_service::export_state().
-     * @return array Same state, with null field/Lore slots replaced by an empty
-     *  slot_structure()-shaped array.
-     */
-    public static function fill_empty_slots(array $state): array {
-        if (empty($state['hasmatch'])) {
-            return $state;
-        }
-
-        foreach (['humanfield', 'humanlore', 'aifield', 'ailore'] as $zone) {
-            $state[$zone] = array_map(
-                static fn($slot) => $slot ?? ['occupied' => false],
-                $state[$zone]
-            );
-        }
-
-        return $state;
     }
 }

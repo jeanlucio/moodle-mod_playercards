@@ -37,9 +37,17 @@ use cache_store;
  * PlayerCards instance open keeps each match separate. Only a finished match becomes a
  * {playercards_attempts} row (a later stage of Fase 3/4, not built yet).
  *
- * Etapa 1 of Fase 3 (SCOPE.md 16): only covers match start, mulligan and reading state.
- * Muster/combat/Lore actions arrive in later etapas and, until then, a match that reaches
- * the main phase simply sits there once rendered — nothing else is actionable yet.
+ * Etapa 2 of Fase 3 (SCOPE.md 16) adds Guardian muster (normal and sacrificial), posture
+ * changes and combat. Lore actions (set_lore/activate_lore/activate_quiz/
+ * class_promotion) arrive in Etapa 3 — until then the Lore zone stays empty, and every
+ * mutating method here only ever needs to reason about Guardian field slots.
+ *
+ * V1 does not enforce the Principal/Combate phase split from SCOPE.md 4.1 as two
+ * distinct states: muster_guardian(), change_posture() and declare_attack() are all
+ * available throughout the single 'main' phase, in any order, each already gated by its
+ * own once-per-turn rule (musterusedthisturn, postureusedthisturn, a Guardian's own
+ * attackedthisturn). Against a solo AI opponent, strict phase ordering mostly matters for
+ * pacing/clarity rather than fairness — revisit if PvP (V2) ever needs the stricter split.
  */
 class match_service {
     /** @var int Cards drawn into each player's opening hand. */
@@ -51,8 +59,14 @@ class match_service {
     /** @var int Guardian field slots per player (SCOPE.md 8: 2 rows x 5 slots). */
     private const FIELD_SLOTS = 5;
 
+    /** @var int Maximum Guardian level musterable for free, without a sacrifice (SCOPE.md 4.2). */
+    private const FREE_MUSTER_MAX_LEVEL = 3;
+
     /** @var string[] Valid AI difficulty levels. */
     private const DIFFICULTIES = ['easy', 'normal', 'hard'];
+
+    /** @var string[] Valid Guardian postures. */
+    private const POSTURES = ['attack', 'defense'];
 
     /**
      * Returns the session-scoped cache backing every match state.
@@ -206,6 +220,8 @@ class match_service {
         // player's turn can actually progress past this point.
         $state['phase'] = 'main';
         $state['turnnumber'] = 1;
+        $state['musterusedthisturn'] = false;
+        $state['postureusedthisturn'] = false;
 
         self::save_state($cmid, $userid, $state);
 
@@ -233,9 +249,8 @@ class match_service {
      * Converts internal match state into the shape sent to the client: the human
      * player's own hand is hydrated with full card metadata, while the AI's hand and
      * both decks are exposed only as counts — hidden information the client must never
-     * receive in detail. Field/Lore zones are always empty in Etapa 1 (no muster/set_lore
-     * yet) but are already shaped as arrays of hydrated-or-null slots so later etapas can
-     * fill them in without changing this contract.
+     * receive in detail. Field/Lore zone slots are hydrated with display metadata,
+     * batched in one pass across all four zones.
      *
      * @param array $state Internal match state.
      * @return array Client-facing state.
@@ -245,6 +260,13 @@ class match_service {
             return ['hasmatch' => false];
         }
 
+        $zones = card_presenter::hydrate_zones([
+            'humanfield' => $state['humanfield'],
+            'humanlore' => $state['humanlore'],
+            'aifield' => $state['aifield'],
+            'ailore' => $state['ailore'],
+        ]);
+
         return [
             'hasmatch' => true,
             'token' => $state['token'],
@@ -253,16 +275,290 @@ class match_service {
             'firstplayer' => $state['firstplayer'],
             'activeplayer' => $state['activeplayer'],
             'turnnumber' => $state['turnnumber'],
+            'musterusedthisturn' => (bool) ($state['musterusedthisturn'] ?? false),
+            'postureusedthisturn' => (bool) ($state['postureusedthisturn'] ?? false),
             'lifepoints' => $state['lifepoints'],
             'humanhand' => card_presenter::hydrate($state['humanhand']),
             'aihandcount' => count($state['aihand']),
             'humandeckcount' => count($state['humandeck']),
             'aideckcount' => count($state['aideck']),
-            'humanfield' => $state['humanfield'],
-            'humanlore' => $state['humanlore'],
-            'aifield' => $state['aifield'],
-            'ailore' => $state['ailore'],
+            'humanfield' => $zones['humanfield'],
+            'humanlore' => $zones['humanlore'],
+            'aifield' => $zones['aifield'],
+            'ailore' => $zones['ailore'],
         ];
+    }
+
+    /**
+     * Musters a Guardian from hand onto an empty field slot: free for level 1-3
+     * (SCOPE.md 4.2), or by sacrificing one own level 1-3 Guardian already in play for
+     * level 4-5. Limited to once per turn regardless of which path is used. The newly
+     * mustered Guardian cannot attack or change posture this turn (summoning sickness).
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param string $handuid Uid of the Guardian card in hand to muster.
+     * @param int $fieldslot Target field slot, 0 to FIELD_SLOTS-1.
+     * @param string $posture attack | defense, chosen at muster time.
+     * @param int|null $sacrificefieldslot Own field slot to sacrifice, required only when
+     *  musterng a level 4-5 Guardian.
+     * @return array Updated match state.
+     */
+    public static function muster_guardian(
+        int $cmid,
+        int $userid,
+        string $token,
+        string $handuid,
+        int $fieldslot,
+        string $posture,
+        ?int $sacrificefieldslot = null
+    ): array {
+        global $DB;
+
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        if (!empty($state['musterusedthisturn'])) {
+            throw new \moodle_exception('error_musteralreadyused', 'mod_playercards');
+        }
+
+        if (!in_array($posture, self::POSTURES, true)) {
+            throw new \moodle_exception('error_invalidposture', 'mod_playercards');
+        }
+
+        if ($fieldslot < 0 || $fieldslot >= self::FIELD_SLOTS || $state['humanfield'][$fieldslot] !== null) {
+            throw new \moodle_exception('error_slotoccupied', 'mod_playercards');
+        }
+
+        $handindex = self::find_hand_index($state['humanhand'], $handuid);
+        if ($handindex === null || $state['humanhand'][$handindex]['cardtype'] !== 'guardian') {
+            throw new \moodle_exception('error_invalidhandcard', 'mod_playercards');
+        }
+
+        $handcard = $state['humanhand'][$handindex];
+        $level = (int) $DB->get_field('playercards_guardians', 'level', ['id' => $handcard['cardid']], MUST_EXIST);
+
+        if ($level <= self::FREE_MUSTER_MAX_LEVEL) {
+            if ($sacrificefieldslot !== null) {
+                throw new \moodle_exception('error_sacrificenotallowed', 'mod_playercards');
+            }
+        } else {
+            if ($sacrificefieldslot === null) {
+                throw new \moodle_exception('error_sacrificerequired', 'mod_playercards');
+            }
+            $sacrifice = self::require_own_guardian_slot($state, $sacrificefieldslot);
+            $sacrificelevel = (int) $DB->get_field(
+                'playercards_guardians',
+                'level',
+                ['id' => $sacrifice['cardid']],
+                MUST_EXIST
+            );
+            if ($sacrificelevel > self::FREE_MUSTER_MAX_LEVEL) {
+                throw new \moodle_exception('error_invalidsacrifice', 'mod_playercards');
+            }
+            $state['humanfield'][$sacrificefieldslot] = null;
+        }
+
+        array_splice($state['humanhand'], $handindex, 1);
+        $state['humanfield'][$fieldslot] = [
+            'uid' => $handcard['uid'],
+            'cardtype' => 'guardian',
+            'cardid' => $handcard['cardid'],
+            'posture' => $posture,
+            'sick' => true,
+            'attackedthisturn' => false,
+        ];
+        $state['musterusedthisturn'] = true;
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Changes the posture of one own Guardian already in play. Limited to once per turn,
+     * and never on a Guardian mustered this same turn (SCOPE.md 4.4).
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param int $fieldslot Own field slot, 0 to FIELD_SLOTS-1.
+     * @return array Updated match state.
+     */
+    public static function change_posture(int $cmid, int $userid, string $token, int $fieldslot): array {
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        if (!empty($state['postureusedthisturn'])) {
+            throw new \moodle_exception('error_posturealreadyused', 'mod_playercards');
+        }
+
+        $guardian = self::require_own_guardian_slot($state, $fieldslot);
+        if (!empty($guardian['sick'])) {
+            throw new \moodle_exception('error_summoningsickness', 'mod_playercards');
+        }
+
+        $state['humanfield'][$fieldslot]['posture'] = $guardian['posture'] === 'attack' ? 'defense' : 'attack';
+        $state['postureusedthisturn'] = true;
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Declares an attack from one own Guardian in Offensive posture against either an
+     * opposing field slot, or directly against the AI's life points when its whole field
+     * is empty (SCOPE.md 4.5). A Guardian can attack at most once per turn, and never the
+     * turn it was mustered.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param int $attackerslot Own field slot declaring the attack.
+     * @param int|null $targetslot Opposing field slot to attack, or null for a direct
+     *  attack (only valid when the AI has no Guardian anywhere in play).
+     * @return array Updated match state.
+     */
+    public static function declare_attack(
+        int $cmid,
+        int $userid,
+        string $token,
+        int $attackerslot,
+        ?int $targetslot
+    ): array {
+        global $DB;
+
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        $attacker = self::require_own_guardian_slot($state, $attackerslot);
+        if ($attacker['posture'] !== 'attack') {
+            throw new \moodle_exception('error_mustbeattackposture', 'mod_playercards');
+        }
+        if (!empty($attacker['sick'])) {
+            throw new \moodle_exception('error_summoningsickness', 'mod_playercards');
+        }
+        if (!empty($attacker['attackedthisturn'])) {
+            throw new \moodle_exception('error_alreadyattacked', 'mod_playercards');
+        }
+
+        $attackercard = $DB->get_record(
+            'playercards_guardians',
+            ['id' => $attacker['cardid']],
+            '*',
+            MUST_EXIST
+        );
+
+        if ($targetslot === null) {
+            if (self::field_has_guardian($state['aifield'])) {
+                throw new \moodle_exception('error_musttargetguardian', 'mod_playercards');
+            }
+            $state['lifepoints']['ai'] -= combat_engine::resolve_direct_attack((int) $attackercard->atk);
+        } else {
+            if (
+                $targetslot < 0
+                || $targetslot >= self::FIELD_SLOTS
+                || $state['aifield'][$targetslot] === null
+            ) {
+                throw new \moodle_exception('error_invalidtarget', 'mod_playercards');
+            }
+
+            $defender = $state['aifield'][$targetslot];
+            $defendercard = $DB->get_record(
+                'playercards_guardians',
+                ['id' => $defender['cardid']],
+                '*',
+                MUST_EXIST
+            );
+
+            $result = combat_engine::resolve_combat(
+                (int) $attackercard->atk,
+                (int) $defendercard->atk,
+                (int) $defendercard->def,
+                $defender['posture'] === 'attack'
+            );
+
+            if ($result['attackerdestroyed']) {
+                $state['humanfield'][$attackerslot] = null;
+            }
+            if ($result['defenderdestroyed']) {
+                $state['aifield'][$targetslot] = null;
+            }
+            $state['lifepoints']['human'] -= $result['attackerdamage'];
+            $state['lifepoints']['ai'] -= $result['defenderdamage'];
+        }
+
+        if ($state['humanfield'][$attackerslot] !== null) {
+            $state['humanfield'][$attackerslot]['attackedthisturn'] = true;
+        }
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Guards a mutating call to a Guardian action against the wrong turn/phase — every
+     * one of muster_guardian()/change_posture()/declare_attack() needs exactly this
+     * check.
+     *
+     * @param array $state Current state.
+     * @return void
+     */
+    private static function require_active_main_phase(array $state): void {
+        if ($state['phase'] !== 'main' || $state['activeplayer'] !== 'human') {
+            throw new \moodle_exception('error_notyourturn', 'mod_playercards');
+        }
+    }
+
+    /**
+     * Finds a hand card's index by its uid.
+     *
+     * @param array $hand Hand entries.
+     * @param string $uid Uid to find.
+     * @return int|null
+     */
+    private static function find_hand_index(array $hand, string $uid): ?int {
+        foreach ($hand as $index => $card) {
+            if ($card['uid'] === $uid) {
+                return $index;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Validates that a given own field slot holds a Guardian, and returns it.
+     *
+     * @param array $state Current state.
+     * @param int $fieldslot Field slot to check.
+     * @return array The Guardian entry.
+     */
+    private static function require_own_guardian_slot(array $state, int $fieldslot): array {
+        if ($fieldslot < 0 || $fieldslot >= self::FIELD_SLOTS || $state['humanfield'][$fieldslot] === null) {
+            throw new \moodle_exception('error_emptyslot', 'mod_playercards');
+        }
+        return $state['humanfield'][$fieldslot];
+    }
+
+    /**
+     * Whether a field zone has at least one Guardian in play.
+     *
+     * @param array $field Field slots (null or Guardian entries).
+     * @return bool
+     */
+    private static function field_has_guardian(array $field): bool {
+        foreach ($field as $slot) {
+            if ($slot !== null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * External function: start a new match vs. the AI.
+ * External function: change a Guardian's posture.
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -32,9 +32,10 @@ use core_external\external_value;
 use mod_playercards\local\match_service;
 
 /**
- * Starts a new match, discarding any previous one for this user/course module.
+ * Toggles the posture (Offensive/Defensive) of one own Guardian already in play
+ * (SCOPE.md 4.4) — once per turn, never the turn it was mustered.
  */
-class start_match extends external_api {
+class change_posture extends external_api {
     /**
      * Returns parameter definitions for execute().
      *
@@ -43,33 +44,39 @@ class start_match extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'cmid' => new external_value(PARAM_INT, 'Course module id'),
-            'difficulty' => new external_value(PARAM_ALPHA, 'easy | normal | hard'),
+            'token' => new external_value(PARAM_ALPHANUMEXT, 'Match token'),
+            'fieldslot' => new external_value(PARAM_INT, 'Own field slot, 0-4'),
         ]);
     }
 
     /**
-     * Starts a new match for the current user.
+     * Changes posture for the current user.
      *
      * @param int $cmid Course module id.
-     * @param string $difficulty easy | normal | hard.
+     * @param string $token Match token.
+     * @param int $fieldslot Own field slot, 0-4.
      * @return array Match state.
      */
-    public static function execute(int $cmid, string $difficulty): array {
-        global $DB, $USER;
+    public static function execute(int $cmid, string $token, int $fieldslot): array {
+        global $USER;
 
-        ['cmid' => $cmid, 'difficulty' => $difficulty] = self::validate_parameters(
-            self::execute_parameters(),
-            ['cmid' => $cmid, 'difficulty' => $difficulty]
-        );
+        $params = self::validate_parameters(self::execute_parameters(), [
+            'cmid' => $cmid,
+            'token' => $token,
+            'fieldslot' => $fieldslot,
+        ]);
 
-        $cm = get_coursemodule_from_id('playercards', $cmid, 0, false, MUST_EXIST);
+        $cm = get_coursemodule_from_id('playercards', $params['cmid'], 0, false, MUST_EXIST);
         $context = context_module::instance($cm->id);
         self::validate_context($context);
         require_capability('mod/playercards:view', $context);
 
-        $instance = $DB->get_record('playercards', ['id' => $cm->instance], '*', MUST_EXIST);
-
-        $state = match_service::start_match($instance, $cmid, (int) $USER->id, $difficulty);
+        $state = match_service::change_posture(
+            $params['cmid'],
+            (int) $USER->id,
+            $params['token'],
+            $params['fieldslot']
+        );
 
         return match_service::export_state($state);
     }
