@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="mod/playercards/db" VERSION="20260911" COMMENT="XMLDB file for Moodle mod_playercards"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="playercards" COMMENT="Stores the PlayerCards activity instances">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="course" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Course this playercards activity belongs to"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Name field for Moodle instances"/>
+        <FIELD NAME="intro" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="General introduction of the playercards activity"/>
+        <FIELD NAME="introformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Format of the intro field"/>
+        <FIELD NAME="aidifficultydefault" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="normal" SEQUENCE="false" COMMENT="Default AI difficulty offered at match start: easy, normal or hard"/>
+        <FIELD NAME="questionsource" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Bitmask: 1=own question pool, 2=real Moodle question bank (core_question)"/>
+        <FIELD NAME="quiztimerseconds" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="20" SEQUENCE="false" COMMENT="Quiz card answer timer, in seconds (15-30 recommended)"/>
+        <FIELD NAME="maxturns" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Optional match turn limit; 0 means unlimited"/>
+        <FIELD NAME="completionwins" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Custom completion rule: number of wins required; 0 disables the rule"/>
+        <FIELD NAME="grade" TYPE="number" LENGTH="10" NOTNULL="true" DEFAULT="100.00000" DECIMALS="5" SEQUENCE="false" COMMENT="Maximum grade for this activity"/>
+        <FIELD NAME="gradepass" TYPE="number" LENGTH="10" NOTNULL="true" DEFAULT="0.00000" DECIMALS="5" SEQUENCE="false" COMMENT="Minimum grade to pass"/>
+        <FIELD NAME="grademethod" TYPE="int" LENGTH="2" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Method used to calculate the final grade from attempts"/>
+        <FIELD NAME="hud_card_cost_item" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="block_playerhud item ID used as currency to buy cards (0 = unconfigured)"/>
+        <FIELD NAME="hud_card_cost_qty" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Base quantity of hud_card_cost_item charged per card purchase"/>
+        <FIELD NAME="hud_retry_cost_item" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="block_playerhud item ID charged for a new match attempt (0 = unconfigured)"/>
+        <FIELD NAME="hud_retry_cost_qty" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Quantity of hud_retry_cost_item charged per retry"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="course" UNIQUE="false" FIELDS="course"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_guardians" COMMENT="Global fixed catalog of Guardian cards, shared across every course/instance (SCOPE.md 17)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="level" TYPE="int" LENGTH="2" NOTNULL="true" SEQUENCE="false" COMMENT="Guardian level, 1 to 5"/>
+        <FIELD NAME="atk" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Attack points; atk + def must equal 400 * level, validated on write"/>
+        <FIELD NAME="def" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Defence points; atk + def must equal 400 * level, validated on write"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Card name"/>
+        <FIELD NAME="description" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Optional flavour text"/>
+        <FIELD NAME="imagefile" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Path to the card art asset"/>
+        <FIELD NAME="maxcopies" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="3" SEQUENCE="false" COMMENT="Maximum copies of this card allowed per deck"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="level" UNIQUE="false" FIELDS="level"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_lore" COMMENT="Lore cards (Info/Quiz/Trap) authored by the teacher, per instance">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="playercardsid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards"/>
+        <FIELD NAME="subtype" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="info | quiz | trap"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Card name"/>
+        <FIELD NAME="content" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Educational text (Info) or effect description"/>
+        <FIELD NAME="effecttype" TYPE="char" LENGTH="50" NOTNULL="true" SEQUENCE="false" COMMENT="Effect identifier; enable_promotion is only valid when subtype is info or quiz"/>
+        <FIELD NAME="effectvalue" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Numeric value used by effecttype"/>
+        <FIELD NAME="maxcopies" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="3" SEQUENCE="false" COMMENT="Maximum copies of this card allowed per deck"/>
+        <FIELD NAME="difficulty" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="easy | medium | hard; required only when subtype is quiz"/>
+        <FIELD NAME="questionsource" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="own | bank; applies when subtype is info or quiz"/>
+        <FIELD NAME="questioncategory" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="question_categories.id (bank source) or playercards_questions.category (own source); drawn at random on each activation"/>
+        <FIELD NAME="createdby" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to user: the teacher who authored this card"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="playercardsid" TYPE="foreign" FIELDS="playercardsid" REFTABLE="playercards" REFFIELDS="id"/>
+        <KEY NAME="createdby" TYPE="foreign" FIELDS="createdby" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="subtype" UNIQUE="false" FIELDS="subtype"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_questions" COMMENT="Own question/content pool, fallback to the real Moodle question bank (mirrors playerpuzzle_questions)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="playercardsid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards"/>
+        <FIELD NAME="category" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Free-form label set by the teacher, groups items drawable by the same Lore card"/>
+        <FIELD NAME="qtype" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="multichoice | truefalse (Quiz) | description (Info, no answer)"/>
+        <FIELD NAME="questiontext" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Question or informational text"/>
+        <FIELD NAME="answers" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of {text, correct}; null when qtype is description"/>
+        <FIELD NAME="approved" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the teacher approved this item for play"/>
+        <FIELD NAME="addedby" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to user: the teacher who added this item"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="playercardsid" TYPE="foreign" FIELDS="playercardsid" REFTABLE="playercards" REFFIELDS="id"/>
+        <KEY NAME="addedby" TYPE="foreign" FIELDS="addedby" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="category" UNIQUE="false" FIELDS="category"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_ownership" COMMENT="Student card collection, scoped per instance (same course scope as PlayerHUD items)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="playercardsid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to user"/>
+        <FIELD NAME="cardtype" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="guardian | lore"/>
+        <FIELD NAME="cardid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards_guardians or playercards_lore, depending on cardtype"/>
+        <FIELD NAME="quantity" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Copies owned; cards are permanent, never decremented by play"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="playercardsid" TYPE="foreign" FIELDS="playercardsid" REFTABLE="playercards" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="playercardsid_userid_cardtype_cardid" UNIQUE="true" FIELDS="playercardsid, userid, cardtype, cardid"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_decks" COMMENT="Student saved decks (per instance) or global AI reference decks (playercardsid null)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="playercardsid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Foreign key to playercards; null for the global AI reference decks"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Foreign key to user; null for the global AI reference decks"/>
+        <FIELD NAME="aidifficulty" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="easy | normal | hard; set only on the 3 fixed AI reference decks"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Deck name"/>
+        <FIELD NAME="size" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Total card count, 40 to 60"/>
+        <FIELD NAME="active" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether this is the student's currently selected deck; irrelevant for AI decks"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="playercardsid" TYPE="foreign" FIELDS="playercardsid" REFTABLE="playercards" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="aidifficulty" UNIQUE="false" FIELDS="aidifficulty"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="playercards_deck_cards" COMMENT="Composition of a deck">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="deckid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards_decks"/>
+        <FIELD NAME="cardtype" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="guardian | lore"/>
+        <FIELD NAME="cardid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards_guardians or playercards_lore, depending on cardtype"/>
+        <FIELD NAME="quantity" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Copies of this card included in the deck"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="deckid" TYPE="foreign" FIELDS="deckid" REFTABLE="playercards_decks" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+
+    <TABLE NAME="playercards_attempts" COMMENT="Completed match history (append-only)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="playercardsid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to user"/>
+        <FIELD NAME="deckid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Foreign key to playercards_decks: the deck used in this match"/>
+        <FIELD NAME="aidifficulty" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="easy | normal | hard"/>
+        <FIELD NAME="result" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="win | loss"/>
+        <FIELD NAME="lpremaining" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Life points remaining at match end"/>
+        <FIELD NAME="turnsplayed" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Total number of individual turns played"/>
+        <FIELD NAME="score" TYPE="number" LENGTH="10" NOTNULL="true" DEFAULT="0.00000" DECIMALS="5" SEQUENCE="false" COMMENT="Grade contribution of this attempt"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="playercardsid" TYPE="foreign" FIELDS="playercardsid" REFTABLE="playercards" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+        <KEY NAME="deckid" TYPE="foreign" FIELDS="deckid" REFTABLE="playercards_decks" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="result" UNIQUE="false" FIELDS="result"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>
