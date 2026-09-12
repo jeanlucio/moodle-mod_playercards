@@ -162,11 +162,14 @@ final class match_service_test extends \advanced_testcase {
      * Starts a match and resolves the mulligan (keeping the hand), reaching turn 1's
      * main phase — the common starting point for every muster/posture/combat test.
      *
-     * start_match() decides the coin toss randomly, so activeplayer is forced to
-     * 'human' here regardless of the real outcome — every caller of this helper tests a
-     * human-only action and needs a deterministic "it's your turn", not a state that
-     * would make roughly half of all test runs fail on an unrelated "not your turn"
-     * check.
+     * start_match() decides the coin toss randomly, so firstplayer/activeplayer are
+     * forced to 'human' here, *before* calling mulligan() — every caller of this helper
+     * tests a human-only action and needs a deterministic "it's your turn", not a state
+     * that would make roughly half of all test runs fail on an unrelated "not your turn"
+     * check. This must happen before mulligan() runs, not after: since mulligan() now
+     * processes the AI's entire turn 1 itself whenever the AI is first (see its own
+     * docblock), overriding activeplayer only after the call would be too late — the
+     * AI's turn would already have mutated life points/turnnumber/etc.
      *
      * @param \stdClass $instance Activity instance.
      * @param int $cmid Course module id.
@@ -175,8 +178,11 @@ final class match_service_test extends \advanced_testcase {
      */
     private function reach_main_phase(\stdClass $instance, int $cmid, int $userid): array {
         $started = match_service::start_match($instance, $cmid, $userid, 'normal');
-        $state = match_service::mulligan($cmid, $userid, $started['token'], true);
-        $state['activeplayer'] = 'human';
+        $started['firstplayer'] = 'human';
+        $started['activeplayer'] = 'human';
+        $this->inject_state($cmid, $userid, $started);
+
+        $state = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
         $this->inject_state($cmid, $userid, $state);
         return $state;
     }
@@ -266,17 +272,59 @@ final class match_service_test extends \advanced_testcase {
 
         $started = match_service::start_match($instance, $cmid, $userid, 'normal');
         $originaluids = array_column($started['humanhand'], 'uid');
+        $started['firstplayer'] = 'human';
+        $started['activeplayer'] = 'human';
+        $this->inject_state($cmid, $userid, $started);
 
-        $kept = match_service::mulligan($cmid, $userid, $started['token'], true);
+        $kept = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
         $this->assertSame('main', $kept['phase']);
         $this->assertSame(1, $kept['turnnumber']);
         $this->assertSame($originaluids, array_column($kept['humanhand'], 'uid'));
 
         // Restart to get a fresh mulligan-phase state, then redraw instead of keeping.
         $restarted = match_service::start_match($instance, $cmid, $userid, 'normal');
-        $redrawn = match_service::mulligan($cmid, $userid, $restarted['token'], false);
+        $restarted['firstplayer'] = 'human';
+        $restarted['activeplayer'] = 'human';
+        $this->inject_state($cmid, $userid, $restarted);
+
+        $redrawn = match_service::mulligan($cmid, $userid, $instance, $restarted['token'], false);
         $this->assertSame('main', $redrawn['phase']);
         $this->assertCount(5, $redrawn['humanhand']);
+    }
+
+    /**
+     * When the AI wins the coin toss, turn 1 belongs to the AI — nothing else would ever
+     * process it (the client only ever calls end_turn() to close the *human's* turn), so
+     * mulligan() must play the AI's turn 1 out itself and open the human's turn 2, rather
+     * than leaving the match stuck forever on "AI's turn" (the real bug this test guards
+     * against — found live: the board showed "Vez da IA" with no way to progress).
+     *
+     * @return void
+     */
+    public function test_mulligan_processes_ai_first_turn_when_ai_wins_coin_toss(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $started = match_service::start_match($instance, $cmid, $userid, 'normal');
+        $started['firstplayer'] = 'ai';
+        $started['activeplayer'] = 'ai';
+        $this->inject_state($cmid, $userid, $started);
+
+        $state = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
+
+        $this->assertFalse($state['finished']);
+        $this->assertSame('human', $state['activeplayer']);
+        // AI's own turn 1, then the human's turn 2 — matches "whoever moves first skips
+        // their own turn-1 draw" applying to the AI here instead of the human.
+        $this->assertSame(2, $state['turnnumber']);
+        $this->assertFalse($state['musterusedthisturn']);
+        $this->assertFalse($state['postureusedthisturn']);
     }
 
     /**
@@ -296,7 +344,7 @@ final class match_service_test extends \advanced_testcase {
         match_service::start_match($instance, 42, (int) $student->id, 'normal');
 
         $this->expectException(\moodle_exception::class);
-        match_service::mulligan(42, (int) $student->id, 'not-the-real-token', true);
+        match_service::mulligan(42, (int) $student->id, $instance, 'not-the-real-token', true);
     }
 
     /**
@@ -808,8 +856,11 @@ final class match_service_test extends \advanced_testcase {
         $loreid = $this->insert_lore_card((int) $instance->id, 'quiz', 'lp_damage', 400, 'test', 'medium');
 
         $started = match_service::start_match($instance, $cmid, $userid, 'hard');
-        $state = match_service::mulligan($cmid, $userid, $started['token'], true);
-        $state['activeplayer'] = 'human';
+        $started['firstplayer'] = 'human';
+        $started['activeplayer'] = 'human';
+        $this->inject_state($cmid, $userid, $started);
+
+        $state = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
         $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
         $this->inject_state($cmid, $userid, $state);
 

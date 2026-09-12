@@ -578,17 +578,28 @@ const bindEvents = () => {
         endturnbtn.addEventListener('click', onEndTurn);
     }
 
+    const playagainbtn = rootEl.querySelector('#playercards-playagain-btn');
+    if (playagainbtn) {
+        playagainbtn.addEventListener('click', onPlayAgain);
+    }
+
     if (currentPanel !== 'main' || currentState.finished) {
         return;
     }
 
-    rootEl.querySelectorAll('.playercards-hand .playercards-card').forEach((el) => {
-        el.addEventListener('click', () => onHandCardClick(el.dataset.uid));
-    });
+    // Mustering/attacking/changing posture are only ever legal on the human's own turn
+    // (match_service::require_active_main_phase() rejects them otherwise); only Lore
+    // activation is instant-speed and stays clickable regardless of whose turn it is
+    // (SCOPE.md 4.6) — see the unconditional listeners below.
+    if (currentState.activeplayer === 'human') {
+        rootEl.querySelectorAll('.playercards-hand .playercards-card').forEach((el) => {
+            el.addEventListener('click', () => onHandCardClick(el.dataset.uid));
+        });
 
-    rootEl.querySelectorAll('.playercards-slot[data-zone="human"]').forEach((el) => {
-        el.addEventListener('click', () => onHumanSlotClick(parseInt(el.dataset.slot, 10)));
-    });
+        rootEl.querySelectorAll('.playercards-slot[data-zone="human"]').forEach((el) => {
+            el.addEventListener('click', () => onHumanSlotClick(parseInt(el.dataset.slot, 10)));
+        });
+    }
 
     rootEl.querySelectorAll('.playercards-slot[data-zone="ai"]').forEach((el) => {
         el.addEventListener('click', () => onAiSlotClick(parseInt(el.dataset.slot, 10)));
@@ -658,6 +669,17 @@ const showState = async(state) => {
         )
         : '';
     await render(buildMainContext(state, turnlabel, promotionlabel, matchendedlabel));
+};
+
+/**
+ * Returns to the lobby after a finished match, so the student can start a new one.
+ * Purely client-side: the finished match's own state is simply overwritten server-side
+ * the next time start_match() is called, so there is nothing to clean up here first.
+ *
+ * @returns {Promise<void>}
+ */
+const onPlayAgain = async() => {
+    await showState({hasmatch: false});
 };
 
 /**

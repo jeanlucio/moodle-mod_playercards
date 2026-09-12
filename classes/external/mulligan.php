@@ -58,7 +58,7 @@ class mulligan extends external_api {
      * @return array Match state.
      */
     public static function execute(int $cmid, string $token, bool $keep): array {
-        global $USER;
+        global $DB, $USER;
 
         ['cmid' => $cmid, 'token' => $token, 'keep' => $keep] = self::validate_parameters(
             self::execute_parameters(),
@@ -70,7 +70,9 @@ class mulligan extends external_api {
         self::validate_context($context);
         require_capability('mod/playercards:view', $context);
 
-        $state = match_service::mulligan($cmid, (int) $USER->id, $token, $keep);
+        $instance = $DB->get_record('playercards', ['id' => $cm->instance], '*', MUST_EXIST);
+
+        $state = match_service::mulligan($cmid, (int) $USER->id, $instance, $token, $keep);
 
         return match_service::export_state($state);
     }

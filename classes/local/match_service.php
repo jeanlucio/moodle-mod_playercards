@@ -204,17 +204,26 @@ class match_service {
      * Resolves the human player's once-only mulligan decision and advances the match to
      * turn 1. The AI never mulligans in V1 — a deliberate simplification (SCOPE.md 17)
      * since a meaningful AI mulligan heuristic has no clear value without the AI's own
-     * play logic (Etapa 2/3) built yet.
+     * play logic built yet.
+     *
+     * If the coin toss (start_match()) put the AI first, turn 1 belongs to the AI and
+     * nothing else would ever process it — the client only ever calls end_turn() to
+     * close the *human's* turn, so an AI-first match would otherwise sit stuck forever on
+     * "AI's turn" with no way to progress. This method processes the AI's turn 1 itself
+     * (via run_ai_turn_then_open_human(), the same helper end_turn() uses for every later
+     * AI turn) before returning, whenever activeplayer is 'ai' at this point.
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
+     * @param \stdClass $instance Activity instance (for maxturns, only reachable when the
+     *  AI goes first and its own turn 1 must be processed here).
      * @param string $token Match token from start_match(), guarding against a stale
      *  client acting on a match that has since been discarded/restarted.
      * @param bool $keep Whether to keep the opening hand (true) or shuffle it back and
      *  draw a fresh one of the same size (false).
      * @return array Updated match state.
      */
-    public static function mulligan(int $cmid, int $userid, string $token, bool $keep): array {
+    public static function mulligan(int $cmid, int $userid, \stdClass $instance, string $token, bool $keep): array {
         $state = self::load_state($cmid, $userid);
         self::validate_token($state, $token);
 
@@ -228,15 +237,21 @@ class match_service {
             $state['humanhand'] = array_splice($state['humandeck'], 0, self::HAND_SIZE);
         }
 
-        // Whoever moves first skips their own turn-1 draw (SCOPE.md 4.9); the second
-        // player's normal draw, when their own first turn eventually comes around, is
-        // just their ordinary per-turn draw step — nothing extra to apply here. Both
-        // still need the full turn-based draw/muster/combat loop (Etapa 4) before either
-        // player's turn can actually progress past this point.
+        // Whoever moves first skips their own turn-1 draw (SCOPE.md 4.9) — enforced by
+        // run_ai_turn_then_open_human()/end_turn() only drawing when turnnumber !== 1, so
+        // nothing extra needs to happen here for either side.
         $state['phase'] = 'main';
         $state['turnnumber'] = 1;
         $state['musterusedthisturn'] = false;
         $state['postureusedthisturn'] = false;
+
+        if ($state['activeplayer'] === 'ai') {
+            $state = self::reset_turn_start($state, 'ai');
+            $state = self::run_ai_turn_then_open_human($cmid, $userid, $instance, $state, (int) $instance->maxturns);
+            if (!empty($state['finished'])) {
+                return $state;
+            }
+        }
 
         self::save_state($cmid, $userid, $state);
 
@@ -816,14 +831,53 @@ class match_service {
         $state['activeplayer'] = 'ai';
         $state = self::reset_turn_start($state, 'ai');
 
-        $maxturns = (int) $instance->maxturns;
+        $state = self::run_ai_turn_then_open_human($cmid, $userid, $instance, $state, (int) $instance->maxturns);
+        if (!empty($state['finished'])) {
+            return $state;
+        }
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Plays out the AI's entire turn — from whatever turnnumber/activeplayer the caller
+     * already set — and opens the human's next turn. Shared by end_turn() (closing an
+     * ordinary human turn) and mulligan() (when the AI won the coin toss and its very
+     * first turn needs to be processed immediately, since no other entry point ever
+     * would — see mulligan()'s own docblock).
+     *
+     * Draws for whichever side is opening a turn are skipped whenever that turn's own
+     * turnnumber is exactly 1 — the only time this can be true is a side's own first
+     * turn, matching "whoever moves first skips their own turn-1 draw" (SCOPE.md 4.9)
+     * regardless of which side that happens to be.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param \stdClass $instance Activity instance.
+     * @param array $state Current state, with activeplayer/turnnumber already set to the
+     *  AI's turn being played out.
+     * @param int $maxturns Configured turn limit, 0 for unlimited.
+     * @return array Updated match state — check ['finished'] before using further, since
+     *  a triggered end condition already saved and returned early.
+     */
+    private static function run_ai_turn_then_open_human(
+        int $cmid,
+        int $userid,
+        \stdClass $instance,
+        array $state,
+        int $maxturns
+    ): array {
         if ($maxturns > 0 && $state['turnnumber'] > $maxturns) {
             return self::finish_match($cmid, $userid, $instance, $state, self::result_by_lifepoints($state));
         }
         if (count($state['aideck']) === 0) {
             return self::finish_match($cmid, $userid, $instance, $state, 'win');
         }
-        $state['aihand'][] = array_shift($state['aideck']);
+        if ($state['turnnumber'] !== 1) {
+            $state['aihand'][] = array_shift($state['aideck']);
+        }
 
         $state = ai_player::play_turn($state);
         if ($state['lifepoints']['ai'] <= 0) {
@@ -845,9 +899,9 @@ class match_service {
         if (count($state['humandeck']) === 0) {
             return self::finish_match($cmid, $userid, $instance, $state, 'loss');
         }
-        $state['humanhand'][] = array_shift($state['humandeck']);
-
-        self::save_state($cmid, $userid, $state);
+        if ($state['turnnumber'] !== 1) {
+            $state['humanhand'][] = array_shift($state['humandeck']);
+        }
 
         return $state;
     }

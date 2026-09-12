@@ -147,6 +147,7 @@ $string['modulenameplural'] = 'PlayerCards activities';
 $string['musterguardian'] = 'Muster';
 $string['noattemptsyet'] = 'No completed matches yet.';
 $string['opponenthand'] = 'Opponent\'s hand';
+$string['playagain'] = 'Play again';
 $string['playercards:addinstance'] = 'Add a new PlayerCards activity';
 $string['playercards:managelore'] = 'Manage PlayerCards Lore cards and questions';
 $string['playercards:view'] = 'Play PlayerCards';

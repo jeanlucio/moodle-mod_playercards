@@ -137,7 +137,10 @@
 
         {{#finished}}
             <div class="playercards-matchended-banner alert alert-info" role="status">
-                {{matchendedlabel}}
+                <span>{{matchendedlabel}}</span>
+                <button type="button" class="btn btn-sm btn-primary" id="playercards-playagain-btn">
+                    {{#str}} playagain, mod_playercards {{/str}}
+                </button>
             </div>
         {{/finished}}
         {{#showendturnbtn}}
@@ -148,24 +151,6 @@
 
         <div class="playercards-zone playercards-zone-ai">
             <div class="playercards-zone-label">{{#str}} opponenthand, mod_playercards {{/str}} ({{aihandcount}})</div>
-            <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
-                {{#aislots}}
-                    <div
-                        class="playercards-slot {{#occupied}}playercards-slot-guardian{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
-                        role="listitem"
-                        data-zone="ai"
-                        data-slot="{{index}}"
-                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../guardianslotlabel}}{{/occupied}}"
-                    >
-                        {{#occupied}}
-                            <div class="playercards-card-name">{{name}}</div>
-                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
-                            <div class="playercards-card-posture">{{posturelabel}}</div>
-                            {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
-                        {{/occupied}}
-                    </div>
-                {{/aislots}}
-            </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
                 {{#ailoreslots}}
                     <div
@@ -184,6 +169,24 @@
                     </div>
                 {{/ailoreslots}}
             </div>
+            <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
+                {{#aislots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-guardian{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="ai"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../guardianslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            <div class="playercards-card-name">{{name}}</div>
+                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
+                            <div class="playercards-card-posture">{{posturelabel}}</div>
+                            {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
+                        {{/occupied}}
+                    </div>
+                {{/aislots}}
+            </div>
             <div class="playercards-deckcount">{{aideckcount}}</div>
         </div>
 
@@ -199,22 +202,6 @@
         <div id="playercards-actionbar" class="playercards-actionbar"></div>
 
         <div class="playercards-zone playercards-zone-human">
-            <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
-                {{#humanloreslots}}
-                    <div
-                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
-                        role="listitem"
-                        data-zone="humanlore"
-                        data-slot="{{index}}"
-                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../loreslotlabel}}{{/occupied}}"
-                    >
-                        {{#occupied}}
-                            <div class="playercards-card-name">{{name}}</div>
-                            <div class="playercards-card-subtype">{{subtypelabel}}</div>
-                        {{/occupied}}
-                    </div>
-                {{/humanloreslots}}
-            </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
                 {{#humanslots}}
                     <div
@@ -232,6 +219,22 @@
                         {{/occupied}}
                     </div>
                 {{/humanslots}}
+            </div>
+            <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
+                {{#humanloreslots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="humanlore"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../loreslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            <div class="playercards-card-name">{{name}}</div>
+                            <div class="playercards-card-subtype">{{subtypelabel}}</div>
+                        {{/occupied}}
+                    </div>
+                {{/humanloreslots}}
             </div>
             <div class="playercards-deckcount">{{humandeckcount}}</div>
             <div class="playercards-zone-label">{{#str}} yourhand, mod_playercards {{/str}}</div>
