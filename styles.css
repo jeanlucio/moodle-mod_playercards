@@ -140,6 +140,11 @@
     margin-block-end: 0.5rem;
 }
 
+.path-mod-playercards .playercards-actionbar-hint {
+    color: var(--bs-secondary-color, #6c757d);
+    font-style: italic;
+}
+
 .path-mod-playercards .playercards-posture-toggle {
     display: flex;
     gap: 0.25rem;
