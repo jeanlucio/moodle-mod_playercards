@@ -630,12 +630,14 @@ final class match_service_test extends \advanced_testcase {
     }
 
     /**
-     * A Guardian cannot attack the same turn it was mustered, nor attack a second time
-     * in the same turn.
+     * A Guardian can attack the same turn it was mustered — real Yu-Gi-Oh has no
+     * "summoning sickness" restriction on attacking (SCOPE.md 4.2, corrected in v1.15
+     * after being modelled on Magic: The Gathering by mistake since v1.0) — but still
+     * cannot attack a second time in the same turn.
      *
      * @return void
      */
-    public function test_declare_attack_rejects_sickness_and_repeat_attacks(): void {
+    public function test_declare_attack_allows_freshly_summoned_guardian_and_rejects_repeat_attacks(): void {
         $this->resetAfterTest(true);
 
         $course = $this->getDataGenerator()->create_course();
@@ -646,22 +648,16 @@ final class match_service_test extends \advanced_testcase {
         $userid = (int) $student->id;
 
         $state = $this->reach_main_phase($instance, $cmid, $userid);
-        $state['humanfield'][0] = $this->field_entry('sick', $guardianids[0], 'attack', true);
-        $state['humanfield'][1] = $this->field_entry('veteran', $guardianids[1], 'attack', false);
+        $state['humanfield'][0] = $this->field_entry('freshlysummoned', $guardianids[0], 'attack', true);
         $this->inject_state($cmid, $userid, $state);
 
-        try {
-            match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
-            $this->fail('Expected a moodle_exception for summoning sickness.');
-        } catch (\moodle_exception $e) {
-            $this->assertSame('error_summoningsickness', $e->errorcode);
-        }
+        $result = match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
 
-        $afterfirst = match_service::declare_attack($cmid, $userid, $state['token'], 1, null);
-        $this->assertTrue($afterfirst['humanfield'][1]['attackedthisturn']);
+        $this->assertTrue($result['humanfield'][0]['attackedthisturn']);
+        $this->assertSame(10000 - 400, $result['lifepoints']['ai']);
 
         $this->expectException(\moodle_exception::class);
-        match_service::declare_attack($cmid, $userid, $state['token'], 1, null);
+        match_service::declare_attack($cmid, $userid, $result['token'], 0, null);
     }
 
     /**
@@ -1025,11 +1021,13 @@ final class match_service_test extends \advanced_testcase {
         $this->assertFalse($result['finished']);
         $this->assertSame('human', $result['activeplayer']);
         $this->assertSame(3, $result['turnnumber']);
-        // The AI mustered its only Guardian instead of attacking (nothing was in play
-        // for it to attack with — the newly mustered card is summoning-sick).
+        // The AI musters its only Guardian, then immediately attacks directly with it
+        // (humanfield is empty) — a Guardian can attack the same turn it is mustered,
+        // real Yu-Gi-Oh has no summoning-sickness restriction on attacking.
         $this->assertNotNull($result['aifield'][0]);
         $this->assertSame($guardianids[0], $result['aifield'][0]['cardid']);
-        $this->assertSame(10000, $result['lifepoints']['human']);
+        $this->assertTrue($result['aifield'][0]['attackedthisturn']);
+        $this->assertSame(10000 - 400, $result['lifepoints']['human']);
         // The human draws one card at the very end of end_turn(), for their next turn.
         $this->assertCount($humandeckbefore - 1, $result['humandeck']);
         $this->assertFalse($result['musterusedthisturn']);

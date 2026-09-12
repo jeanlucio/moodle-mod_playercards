@@ -92,9 +92,11 @@ class ai_player {
     }
 
     /**
-     * Attacks with every AI Guardian eligible to (Attack posture, not summoning-sick,
-     * has not already attacked this turn), against the first human Guardian in play, or
-     * directly if the human's field is empty (SCOPE.md 4.5).
+     * Attacks with every AI Guardian eligible to (Attack posture, has not already
+     * attacked this turn — including one just mustered this same turn by muster() above,
+     * since real Yu-Gi-Oh has no restriction on attacking the turn a monster is
+     * Summoned), against the first human Guardian in play, or directly if the human's
+     * field is empty (SCOPE.md 4.5).
      *
      * @param array $state Match state.
      * @return array Updated match state.
@@ -106,7 +108,6 @@ class ai_player {
             if (
                 $attacker === null
                 || $attacker['posture'] !== 'attack'
-                || !empty($attacker['sick'])
                 || !empty($attacker['attackedthisturn'])
             ) {
                 continue;

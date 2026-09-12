@@ -377,7 +377,10 @@ const refreshAttackerUi = (actionbar) => {
 
     const attacker = currentState.humanfield[selectedAttackerSlot];
     const aiHasGuardian = currentState.aifield.some((slot) => slot.occupied);
-    const canAttack = attacker.posture === 'attack' && !attacker.sick && !attacker.attackedthisturn;
+    // A Guardian can attack the same turn it was mustered (real Yu-Gi-Oh has no
+    // "summoning sickness" restriction on attacking); only changing battle position is
+    // blocked that turn.
+    const canAttack = attacker.posture === 'attack' && !attacker.attackedthisturn;
     const canChangePosture = !attacker.sick && !currentState.postureusedthisturn;
 
     if (canAttack && aiHasGuardian) {
@@ -804,12 +807,15 @@ const onHumanSlotClick = async(index) => {
     }
 
     const slot = currentState.humanfield[index];
-    if (!slot.occupied || slot.sick) {
+    if (!slot.occupied) {
         clearSelection();
         refreshSelectionUi();
         return;
     }
 
+    // A Guardian mustered this same turn can still be selected here — it is eligible to
+    // attack immediately (see refreshAttackerUi()'s canAttack), just not to change
+    // posture.
     selectedAttackerSlot = selectedAttackerSlot === index ? null : index;
     refreshSelectionUi();
 };

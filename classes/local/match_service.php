@@ -330,7 +330,9 @@ class match_service {
      * Musters a Guardian from hand onto an empty field slot: free for level 1-3
      * (SCOPE.md 4.2), or by sacrificing one own level 1-3 Guardian already in play for
      * level 4-5. Limited to once per turn regardless of which path is used. The newly
-     * mustered Guardian cannot attack or change posture this turn (summoning sickness).
+     * mustered Guardian can attack this same turn (real Yu-Gi-Oh has no restriction on
+     * that), but cannot change battle position until the following turn — see
+     * change_posture().
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
@@ -451,8 +453,10 @@ class match_service {
     /**
      * Declares an attack from one own Guardian in Offensive posture against either an
      * opposing field slot, or directly against the AI's life points when its whole field
-     * is empty (SCOPE.md 4.5). A Guardian can attack at most once per turn, and never the
-     * turn it was mustered.
+     * is empty (SCOPE.md 4.5). A Guardian can attack at most once per turn — including
+     * the turn it was mustered (real Yu-Gi-Oh has no "summoning sickness" restriction on
+     * attacking, unlike Magic: The Gathering; only changing battle position is blocked
+     * the turn a Guardian arrives — see change_posture()).
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
@@ -478,9 +482,6 @@ class match_service {
         $attacker = self::require_own_guardian_slot($state, $attackerslot);
         if ($attacker['posture'] !== 'attack') {
             throw new \moodle_exception('error_mustbeattackposture', 'mod_playercards');
-        }
-        if (!empty($attacker['sick'])) {
-            throw new \moodle_exception('error_summoningsickness', 'mod_playercards');
         }
         if (!empty($attacker['attackedthisturn'])) {
             throw new \moodle_exception('error_alreadyattacked', 'mod_playercards');
@@ -710,8 +711,9 @@ class match_service {
      * wrong AI answer — both set state['pendingpromotion'] via lore_effect_resolver).
      * Sacrifices 2 own Guardians (at least one already in play) and permanently boosts a
      * third's ATK or DEF. If the target came from hand, its entry to the field is a
-     * Special Summon: it does not consume the turn's normal muster, but still carries
-     * summoning sickness like any other newly-arrived Guardian.
+     * Special Summon: it does not consume the turn's normal muster, and — like any
+     * newly-arrived Guardian — cannot change battle position this same turn, though it
+     * can still attack (see change_posture()/declare_attack()).
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.

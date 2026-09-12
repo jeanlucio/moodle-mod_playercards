@@ -73,7 +73,9 @@ final class ai_player_test extends \advanced_testcase {
 
     /**
      * play_turn() musters the first level 1-3 Guardian in hand into the first empty
-     * field slot, marking it summoning-sick so it cannot attack this same turn.
+     * field slot, marking it summoning-sick (so it cannot change posture next turn —
+     * SCOPE.md 4.4), then immediately attacks with it in the same turn: real Yu-Gi-Oh
+     * has no restriction on attacking with a Guardian the turn it was mustered.
      *
      * @return void
      */
@@ -91,6 +93,8 @@ final class ai_player_test extends \advanced_testcase {
         $this->assertTrue($result['aifield'][0]['sick']);
         $this->assertSame('attack', $result['aifield'][0]['posture']);
         $this->assertNotContains('a1', array_column($result['aihand'], 'uid'));
+        $this->assertTrue($result['aifield'][0]['attackedthisturn']);
+        $this->assertSame(10000 - 800, $result['lifepoints']['human']);
     }
 
     /**
@@ -164,27 +168,25 @@ final class ai_player_test extends \advanced_testcase {
     }
 
     /**
-     * A summoning-sick Guardian, one that already attacked this turn, and one in
-     * Defensive posture are all skipped by the AI's attack step.
+     * A Guardian that already attacked this turn, and one in Defensive posture, are
+     * skipped by the AI's attack step. A summoning-sick Guardian (mustered this same
+     * turn) is deliberately NOT one of these cases — see
+     * test_play_turn_attacks_with_a_freshly_summoned_guardian() — real Yu-Gi-Oh has no
+     * restriction on attacking the turn a Guardian was Summoned.
      *
      * @return void
      */
     public function test_play_turn_skips_ineligible_attackers(): void {
         $this->resetAfterTest(true);
 
-        $sickid = $this->insert_guardian(1, 400);
         $spentid = $this->insert_guardian(1, 400);
         $defenseid = $this->insert_guardian(1, 400);
         $state = $this->base_state();
         $state['aifield'][0] = [
-            'uid' => 'sick', 'cardtype' => 'guardian', 'cardid' => $sickid,
-            'posture' => 'attack', 'sick' => true, 'attackedthisturn' => false,
-        ];
-        $state['aifield'][1] = [
             'uid' => 'spent', 'cardtype' => 'guardian', 'cardid' => $spentid,
             'posture' => 'attack', 'sick' => false, 'attackedthisturn' => true,
         ];
-        $state['aifield'][2] = [
+        $state['aifield'][1] = [
             'uid' => 'defense', 'cardtype' => 'guardian', 'cardid' => $defenseid,
             'posture' => 'defense', 'sick' => false, 'attackedthisturn' => false,
         ];
@@ -192,5 +194,30 @@ final class ai_player_test extends \advanced_testcase {
         $result = ai_player::play_turn($state);
 
         $this->assertSame(10000, $result['lifepoints']['human']);
+    }
+
+    /**
+     * A Guardian mustered this same turn (summoning-sick) still attacks normally in the
+     * same turn — real Yu-Gi-Oh has no restriction on attacking with a monster the turn
+     * it was Summoned, only on changing its battle position (SCOPE.md 4.2/4.4, corrected
+     * in v1.15 after being modelled on Magic: The Gathering's summoning sickness by
+     * mistake since v1.0).
+     *
+     * @return void
+     */
+    public function test_play_turn_attacks_with_a_freshly_summoned_guardian(): void {
+        $this->resetAfterTest(true);
+
+        $guardianid = $this->insert_guardian(1, 400);
+        $state = $this->base_state();
+        $state['aifield'][0] = [
+            'uid' => 'freshlysummoned', 'cardtype' => 'guardian', 'cardid' => $guardianid,
+            'posture' => 'attack', 'sick' => true, 'attackedthisturn' => false,
+        ];
+
+        $result = ai_player::play_turn($state);
+
+        $this->assertSame(10000 - 400, $result['lifepoints']['human']);
+        $this->assertTrue($result['aifield'][0]['attackedthisturn']);
     }
 }
