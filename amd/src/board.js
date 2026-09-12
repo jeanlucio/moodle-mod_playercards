@@ -14,9 +14,12 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Renders the PlayerCards board and drives match start/mulligan/muster/posture/combat
- * (SCOPE.md 16, Fase 3 Etapas 1-2). Lore actions (set_lore/activate_lore/activate_quiz/
- * class_promotion) arrive in Etapa 3, alongside their own Web Services.
+ * Renders the PlayerCards board and drives match start/mulligan/muster/posture/combat/
+ * Lore/Class Promotion (SCOPE.md 16, Fase 3 Etapas 1-3). submit_quiz_answer is not wired
+ * up here: the only reachable activation path so far is the human activating their own
+ * Quiz Lore, which the AI always answers itself (see activate_quiz()) — a real pending
+ * question for the human to answer only becomes reachable once the AI can activate Lore
+ * on its own turn.
  *
  * @module     mod_playercards/board
  * @copyright  2026 Jean Lúcio
@@ -58,12 +61,36 @@ const STRING_REQUESTS = [
     {key: 'declareattack', component: 'mod_playercards'},
     {key: 'directattackbtn', component: 'mod_playercards'},
     {key: 'summonedthisturn', component: 'mod_playercards'},
+    {key: 'selectemptyloreslot', component: 'mod_playercards'},
+    {key: 'selecteffecttarget', component: 'mod_playercards'},
+    {key: 'selectpromotionsacrifice', component: 'mod_playercards'},
+    {key: 'selectpromotiontarget', component: 'mod_playercards'},
+    {key: 'boostatk', component: 'mod_playercards'},
+    {key: 'boostdef', component: 'mod_playercards'},
+    {key: 'effectapplied', component: 'mod_playercards'},
+    {key: 'wrongansweractivated', component: 'mod_playercards'},
+    {key: 'classpromotion', component: 'mod_playercards'},
     {key: 'cancel', component: 'core'},
     {key: 'error', component: 'core'},
 ];
 
 /** @var {number} Guardian level up to which mustering is free (SCOPE.md 4.2). */
 const FREE_MUSTER_MAX_LEVEL = 3;
+
+/**
+ * Fixed target kind per known Lore effecttype (mirrors
+ * mod_playercards\local\lore_effect_resolver on the server) — only used here to decide
+ * whether the client must prompt for a target slot before calling activate_lore/
+ * activate_quiz, and which zone that target comes from.
+ */
+const EFFECT_TARGET_KIND = {
+    'atk_buff': 'own',
+    'def_buff': 'own',
+    'destroy': 'enemy',
+    'lp_heal': null,
+    'lp_damage': null,
+    'enable_promotion': null,
+};
 
 let cmid = 0;
 let defaultDifficulty = 'normal';
@@ -73,13 +100,19 @@ let currentState = null;
 let currentPanel = 'lobby';
 let strings = {};
 
-// Ephemeral client-only selection state for the muster/posture/attack flow — never sent
-// to the server until the player completes an action; cleared after every WS call and
-// on cancel.
+// Ephemeral client-only selection state for the muster/posture/attack/Lore/Class
+// Promotion flows — never sent to the server until the player completes an action;
+// cleared after every WS call and on cancel.
 let selectedHandUid = null;
 let selectedPosture = 'attack';
 let selectedSacrificeSlot = null;
 let selectedAttackerSlot = null;
+let selectedLoreSlot = null;
+let selectedLoreMethod = null;
+let selectedLoreTargetKind = null;
+let promotionMode = false;
+let promotionSacrifices = [];
+let promotionTarget = null;
 
 /**
  * Calls a Web Service function by name.
@@ -91,7 +124,7 @@ let selectedAttackerSlot = null;
 const callWs = (methodname, args) => Ajax.call([{methodname, args}])[0];
 
 /**
- * Clears every piece of client-only selection state (muster/attack in progress).
+ * Clears every piece of client-only selection state.
  *
  * @returns {void}
  */
@@ -100,6 +133,12 @@ const clearSelection = () => {
     selectedPosture = 'attack';
     selectedSacrificeSlot = null;
     selectedAttackerSlot = null;
+    selectedLoreSlot = null;
+    selectedLoreMethod = null;
+    selectedLoreTargetKind = null;
+    promotionMode = false;
+    promotionSacrifices = [];
+    promotionTarget = null;
 };
 
 /**
@@ -121,13 +160,13 @@ const hydrateHand = (hand) => hand.map((card) => ({
 }));
 
 /**
- * Maps a raw field zone (5 slots, each occupied or not) into the shape the template's
- * slot loop expects, adding the slot's own index.
+ * Maps a raw Guardian field zone (5 slots) into the shape the template's slot loop
+ * expects, adding the slot's own index.
  *
  * @param {Array} zone Raw slot entries from match state.
  * @returns {Array}
  */
-const hydrateZone = (zone) => zone.map((slot, index) => ({
+const hydrateFieldZone = (zone) => zone.map((slot, index) => ({
     index,
     occupied: slot.occupied,
     name: slot.name,
@@ -135,6 +174,22 @@ const hydrateZone = (zone) => zone.map((slot, index) => ({
     def: slot.def,
     posturelabel: slot.posture === 'attack' ? strings.attackposture : strings.defenseposture,
     sicklabel: slot.sick ? strings.summonedthisturn : '',
+}));
+
+/**
+ * Maps a raw Lore zone (5 slots) into the shape the template's slot loop expects. A
+ * face-down slot (always the opponent's, per card_presenter::hydrate_zones()'s
+ * per-owner reveal rule) carries no name/subtype at all.
+ *
+ * @param {Array} zone Raw slot entries from match state.
+ * @returns {Array}
+ */
+const hydrateLoreZone = (zone) => zone.map((slot, index) => ({
+    index,
+    occupied: slot.occupied,
+    facedown: slot.facedown,
+    name: slot.name,
+    subtypelabel: slot.subtype ? strings['lore' + slot.subtype] : '',
 }));
 
 /**
@@ -172,9 +227,11 @@ const buildMulliganContext = (state) => ({
  *
  * @param {object} state Match state from the Web service.
  * @param {string} turnlabel Already-resolved "Turn N" string.
+ * @param {string} promotionlabel Already-resolved "Class Promotion available (+N)" string,
+ *  empty when none is pending.
  * @returns {object}
  */
-const buildMainContext = (state, turnlabel) => ({
+const buildMainContext = (state, turnlabel, promotionlabel) => ({
     showlobby: false,
     showmulligan: false,
     showmain: true,
@@ -189,8 +246,12 @@ const buildMainContext = (state, turnlabel) => ({
     guardianslotlabel: strings.emptyguardianslot,
     loreslotlabel: strings.emptyloreslot,
     fieldslots: [1, 2, 3, 4, 5],
-    aislots: hydrateZone(state.aifield),
-    humanslots: hydrateZone(state.humanfield),
+    aislots: hydrateFieldZone(state.aifield),
+    humanslots: hydrateFieldZone(state.humanfield),
+    ailoreslots: hydrateLoreZone(state.ailore),
+    humanloreslots: hydrateLoreZone(state.humanlore),
+    haspendingpromotion: state.haspendingpromotion,
+    promotionlabel,
 });
 
 /**
@@ -214,10 +275,126 @@ const isSacrificeEligible = (index) => {
 };
 
 /**
- * Renders the contextual action bar (posture choice during muster, or
- * attack/change-posture/cancel buttons for a selected own Guardian) and refreshes
- * selection-highlight classes on the rendered slots/hand cards. Runs after every
- * render() and after every selection change — none of this needs a server round-trip.
+ * Renders the action bar for an in-progress Lore effect target selection, highlighting
+ * the eligible slots in whichever zone the effect targets.
+ *
+ * @param {HTMLElement} actionbar Action bar container, already emptied.
+ * @returns {void}
+ */
+const refreshLoreTargetUi = (actionbar) => {
+    rootEl.querySelector(`.playercards-slot[data-zone="humanlore"][data-slot="${selectedLoreSlot}"]`)
+        ?.classList.add('playercards-selected');
+
+    const zone = selectedLoreTargetKind === 'own' ? currentState.humanfield : currentState.aifield;
+    const zoneattr = selectedLoreTargetKind === 'own' ? 'human' : 'ai';
+    zone.forEach((slot, index) => {
+        if (slot.occupied) {
+            rootEl.querySelector(`.playercards-slot[data-zone="${zoneattr}"][data-slot="${index}"]`)
+                ?.classList.add('playercards-target');
+        }
+    });
+
+    actionbar.appendChild(buildTextNode(strings.selecteffecttarget));
+    actionbar.appendChild(buildCancelButton());
+};
+
+/**
+ * Renders the action bar for an in-progress hand card selection: placing a Lore card,
+ * or mustering a Guardian (with its own sacrifice step for level 4-5).
+ *
+ * @param {HTMLElement} actionbar Action bar container, already emptied.
+ * @returns {void}
+ */
+const refreshHandSelectionUi = (actionbar) => {
+    const handcard = findHandCard(selectedHandUid);
+    const handEl = rootEl.querySelector(`.playercards-hand .playercards-card[data-uid="${selectedHandUid}"]`);
+    if (handEl) {
+        handEl.classList.add('playercards-selected');
+    }
+
+    if (handcard.cardtype === 'lore') {
+        currentState.humanlore.forEach((slot, index) => {
+            if (!slot.occupied) {
+                rootEl.querySelector(`.playercards-slot[data-zone="humanlore"][data-slot="${index}"]`)
+                    ?.classList.add('playercards-target');
+            }
+        });
+        actionbar.appendChild(buildTextNode(strings.selectemptyloreslot));
+        actionbar.appendChild(buildCancelButton());
+        return;
+    }
+
+    const needsSacrifice = handcard.level > FREE_MUSTER_MAX_LEVEL;
+    if (needsSacrifice && selectedSacrificeSlot === null) {
+        currentState.humanfield.forEach((slot, index) => {
+            if (isSacrificeEligible(index)) {
+                rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${index}"]`)
+                    ?.classList.add('playercards-target');
+            }
+        });
+        actionbar.appendChild(buildTextNode(strings.selectsacrifice));
+        return;
+    }
+
+    if (selectedSacrificeSlot !== null) {
+        rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${selectedSacrificeSlot}"]`)
+            ?.classList.add('playercards-selected');
+    }
+
+    currentState.humanfield.forEach((slot, index) => {
+        if (!slot.occupied || index === selectedSacrificeSlot) {
+            rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${index}"]`)
+                ?.classList.add('playercards-target');
+        }
+    });
+
+    actionbar.appendChild(buildPostureToggle());
+    actionbar.appendChild(buildTextNode(strings.selectslottomuster));
+    actionbar.appendChild(buildCancelButton());
+};
+
+/**
+ * Renders the action bar for a selected own Guardian: attack/change-posture, whichever
+ * this specific Guardian is currently eligible for.
+ *
+ * @param {HTMLElement} actionbar Action bar container, already emptied.
+ * @returns {void}
+ */
+const refreshAttackerUi = (actionbar) => {
+    const attackerEl = rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${selectedAttackerSlot}"]`);
+    attackerEl?.classList.add('playercards-selected');
+
+    const attacker = currentState.humanfield[selectedAttackerSlot];
+    const aiHasGuardian = currentState.aifield.some((slot) => slot.occupied);
+    const canAttack = attacker.posture === 'attack' && !attacker.sick && !attacker.attackedthisturn;
+    const canChangePosture = !attacker.sick && !currentState.postureusedthisturn;
+
+    if (canAttack && aiHasGuardian) {
+        currentState.aifield.forEach((slot, index) => {
+            if (slot.occupied) {
+                rootEl.querySelector(`.playercards-slot[data-zone="ai"][data-slot="${index}"]`)
+                    ?.classList.add('playercards-target');
+            }
+        });
+    }
+
+    if (canAttack && !aiHasGuardian) {
+        actionbar.appendChild(buildActionButton(strings.directattackbtn, onDirectAttack));
+    } else if (canAttack) {
+        actionbar.appendChild(buildTextNode(strings.declareattack));
+    }
+    if (canChangePosture) {
+        actionbar.appendChild(buildActionButton(strings.changeposturebtn, onChangePosture));
+    }
+    actionbar.appendChild(buildCancelButton());
+};
+
+/**
+ * Renders the contextual action bar (posture choice during a muster; attack/change-
+ * posture/cancel for a selected Guardian; a target hint during Lore activation; the
+ * sacrifice/target/stat picker during a Class Promotion) and refreshes selection-
+ * highlight classes on the rendered slots/hand cards. Runs after every render() and
+ * after every selection change — none of this needs a server round-trip.
  *
  * @returns {void}
  */
@@ -234,79 +411,64 @@ const refreshSelectionUi = () => {
     if (!actionbar) {
         return;
     }
+    actionbar.innerHTML = '';
 
-    if (selectedHandUid !== null) {
-        const handcard = findHandCard(selectedHandUid);
-        const handEl = rootEl.querySelector(`.playercards-hand .playercards-card[data-uid="${selectedHandUid}"]`);
-        if (handEl) {
-            handEl.classList.add('playercards-selected');
-        }
+    if (promotionMode) {
+        refreshPromotionUi(actionbar);
+    } else if (selectedLoreSlot !== null) {
+        refreshLoreTargetUi(actionbar);
+    } else if (selectedHandUid !== null) {
+        refreshHandSelectionUi(actionbar);
+    } else if (selectedAttackerSlot !== null) {
+        refreshAttackerUi(actionbar);
+    }
+};
 
-        const needsSacrifice = handcard !== null && handcard.level > FREE_MUSTER_MAX_LEVEL;
-        if (needsSacrifice && selectedSacrificeSlot === null) {
-            currentState.humanfield.forEach((slot, index) => {
-                if (isSacrificeEligible(index)) {
-                    rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${index}"]`)
-                        ?.classList.add('playercards-target');
-                }
-            });
-            actionbar.textContent = strings.selectsacrifice;
-            return;
-        }
+/**
+ * Renders the Class Promotion action bar for the current step (choosing 2 sacrifices,
+ * then a target, then the ATK/DEF stat) and highlights the eligible field slots for
+ * whichever step is active. The live UI only offers field-sourced sacrifices/targets —
+ * the Web service itself also accepts hand-sourced references (PHPUnit-covered), a
+ * simplification to keep this etapa's interaction manageable.
+ *
+ * @param {HTMLElement} actionbar Action bar container, already emptied.
+ * @returns {void}
+ */
+const refreshPromotionUi = (actionbar) => {
+    promotionSacrifices.forEach((slotindex) => {
+        rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${slotindex}"]`)
+            ?.classList.add('playercards-selected');
+    });
 
-        if (selectedSacrificeSlot !== null) {
-            rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${selectedSacrificeSlot}"]`)
-                ?.classList.add('playercards-selected');
-        }
-
+    if (promotionSacrifices.length < 2) {
         currentState.humanfield.forEach((slot, index) => {
-            if (!slot.occupied || index === selectedSacrificeSlot) {
+            if (slot.occupied && !promotionSacrifices.includes(index)) {
                 rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${index}"]`)
                     ?.classList.add('playercards-target');
             }
         });
-
-        actionbar.innerHTML = '';
-        actionbar.appendChild(buildPostureToggle());
-        actionbar.appendChild(buildTextNode(strings.selectslottomuster));
+        actionbar.appendChild(buildTextNode(strings.selectpromotionsacrifice));
         actionbar.appendChild(buildCancelButton());
         return;
     }
 
-    if (selectedAttackerSlot !== null) {
-        const attackerEl = rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${selectedAttackerSlot}"]`);
-        attackerEl?.classList.add('playercards-selected');
-
-        const attacker = currentState.humanfield[selectedAttackerSlot];
-        const aiHasGuardian = currentState.aifield.some((slot) => slot.occupied);
-        const canAttack = attacker.posture === 'attack' && !attacker.sick && !attacker.attackedthisturn;
-        const canChangePosture = !attacker.sick && !currentState.postureusedthisturn;
-
-        if (canAttack) {
-            if (aiHasGuardian) {
-                currentState.aifield.forEach((slot, index) => {
-                    if (slot.occupied) {
-                        rootEl.querySelector(`.playercards-slot[data-zone="ai"][data-slot="${index}"]`)
-                            ?.classList.add('playercards-target');
-                    }
-                });
+    if (promotionTarget === null) {
+        currentState.humanfield.forEach((slot, index) => {
+            if (slot.occupied && !promotionSacrifices.includes(index)) {
+                rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${index}"]`)
+                    ?.classList.add('playercards-target');
             }
-        }
-
-        actionbar.innerHTML = '';
-        if (canAttack && !aiHasGuardian) {
-            actionbar.appendChild(buildActionButton(strings.directattackbtn, onDirectAttack));
-        } else if (canAttack) {
-            actionbar.appendChild(buildTextNode(strings.declareattack));
-        }
-        if (canChangePosture) {
-            actionbar.appendChild(buildActionButton(strings.changeposturebtn, onChangePosture));
-        }
+        });
+        actionbar.appendChild(buildTextNode(strings.selectpromotiontarget));
         actionbar.appendChild(buildCancelButton());
         return;
     }
 
-    actionbar.innerHTML = '';
+    rootEl.querySelector(`.playercards-slot[data-zone="human"][data-slot="${promotionTarget}"]`)
+        ?.classList.add('playercards-selected');
+    actionbar.appendChild(buildActionButton(strings.boostatk, () => onFinalizePromotion('atk')));
+    actionbar.appendChild(buildActionButton(strings.boostdef, () => onFinalizePromotion('def')));
+    actionbar.appendChild(buildCancelButton());
 };
 
 /**
@@ -416,6 +578,19 @@ const bindEvents = () => {
         el.addEventListener('click', () => onAiSlotClick(parseInt(el.dataset.slot, 10)));
     });
 
+    rootEl.querySelectorAll('.playercards-slot[data-zone="humanlore"]').forEach((el) => {
+        el.addEventListener('click', () => onHumanLoreSlotClick(parseInt(el.dataset.slot, 10)));
+    });
+
+    const promotebtn = rootEl.querySelector('#playercards-promote-btn');
+    if (promotebtn) {
+        promotebtn.addEventListener('click', () => {
+            clearSelection();
+            promotionMode = true;
+            refreshSelectionUi();
+        });
+    }
+
     refreshSelectionUi();
 };
 
@@ -456,7 +631,10 @@ const showState = async(state) => {
 
     currentPanel = 'main';
     const turnlabel = await getString('turnnumberlabel', 'mod_playercards', state.turnnumber);
-    await render(buildMainContext(state, turnlabel));
+    const promotionlabel = state.haspendingpromotion
+        ? await getString('promotionavailable', 'mod_playercards', state.pendingpromotionbonus)
+        : '';
+    await render(buildMainContext(state, turnlabel, promotionlabel));
 };
 
 /**
@@ -492,19 +670,25 @@ const onMulligan = async(keep) => {
 };
 
 /**
- * Handles clicking a card in the player's own hand — selects it (Guardians only) to
- * start a muster, or clears the selection if the same card is clicked again.
+ * Handles clicking a card in the player's own hand — selects a Guardian to start a
+ * muster, or a Lore card to start placing it face-down. Clicking the same card again
+ * clears the selection. Ignored while a Class Promotion selection is in progress.
  *
  * @param {string} uid Card uid.
  * @returns {void}
  */
 const onHandCardClick = (uid) => {
+    if (promotionMode) {
+        return;
+    }
+
     const card = findHandCard(uid);
-    if (card === null || card.cardtype !== 'guardian') {
+    if (card === null) {
         return;
     }
 
     selectedAttackerSlot = null;
+    selectedLoreSlot = null;
 
     if (selectedHandUid === uid) {
         clearSelection();
@@ -518,16 +702,32 @@ const onHandCardClick = (uid) => {
 };
 
 /**
- * Handles clicking one of the player's own field slots — either a step in an in-progress
- * muster (choosing the sacrifice, then the target slot), or selecting an existing
- * Guardian to attack/change posture.
+ * Handles clicking one of the player's own field slots — a step in an in-progress
+ * muster (choosing the sacrifice, then the target slot), the target for a Lore effect
+ * targeting an own Guardian, a step in an in-progress Class Promotion, or selecting an
+ * existing Guardian to attack/change posture.
  *
  * @param {number} index Field slot index.
  * @returns {Promise<void>}
  */
 const onHumanSlotClick = async(index) => {
+    if (promotionMode) {
+        onPromotionFieldClick(index);
+        return;
+    }
+
+    if (selectedLoreSlot !== null) {
+        if (selectedLoreTargetKind === 'own' && currentState.humanfield[index].occupied) {
+            await finalizeLoreActivation(index);
+        }
+        return;
+    }
+
     if (selectedHandUid !== null) {
         const handcard = findHandCard(selectedHandUid);
+        if (handcard.cardtype !== 'guardian') {
+            return;
+        }
         const slot = currentState.humanfield[index];
 
         if (handcard.level > FREE_MUSTER_MAX_LEVEL && selectedSacrificeSlot === null) {
@@ -571,12 +771,20 @@ const onHumanSlotClick = async(index) => {
 
 /**
  * Handles clicking one of the AI's field slots — declares an attack against it when an
- * own attacker is currently selected.
+ * own attacker is currently selected, or resolves a Lore effect targeting an enemy
+ * Guardian (e.g. destroy).
  *
  * @param {number} index Field slot index.
  * @returns {Promise<void>}
  */
 const onAiSlotClick = async(index) => {
+    if (selectedLoreSlot !== null) {
+        if (selectedLoreTargetKind === 'enemy' && currentState.aifield[index].occupied) {
+            await finalizeLoreActivation(index);
+        }
+        return;
+    }
+
     if (selectedAttackerSlot === null || !currentState.aifield[index].occupied) {
         return;
     }
@@ -589,6 +797,97 @@ const onAiSlotClick = async(index) => {
             targetslot: index,
         });
         await showState(state);
+    } catch (error) {
+        Notification.alert(strings.error, error.message);
+    }
+};
+
+/**
+ * Handles clicking one of the player's own Lore slots — completes an in-progress
+ * set_lore placement, or (with nothing else selected) starts activating a face-down
+ * Lore card the player already knows the identity of (own Lore is never truly hidden
+ * from its own owner — see card_presenter::hydrate_zones()).
+ *
+ * @param {number} index Lore slot index.
+ * @returns {Promise<void>}
+ */
+const onHumanLoreSlotClick = async(index) => {
+    if (selectedHandUid !== null) {
+        const handcard = findHandCard(selectedHandUid);
+        if (handcard.cardtype !== 'lore' || currentState.humanlore[index].occupied) {
+            return;
+        }
+
+        try {
+            const state = await callWs('mod_playercards_set_lore', {
+                cmid,
+                token: currentToken,
+                handuid: selectedHandUid,
+                loreslot: index,
+            });
+            await showState(state);
+        } catch (error) {
+            Notification.alert(strings.error, error.message);
+        }
+        return;
+    }
+
+    const slot = currentState.humanlore[index];
+    if (!slot.occupied || selectedLoreSlot !== null) {
+        return;
+    }
+
+    const method = slot.subtype === 'quiz' ? 'activate_quiz' : 'activate_lore';
+    const targetkind = EFFECT_TARGET_KIND[slot.effecttype] ?? null;
+
+    if (targetkind === null) {
+        await callLoreActivationWs(method, index, null);
+        return;
+    }
+
+    selectedLoreSlot = index;
+    selectedLoreMethod = method;
+    selectedLoreTargetKind = targetkind;
+    refreshSelectionUi();
+};
+
+/**
+ * Calls the currently in-progress Lore activation once its target (if any) is known,
+ * and shows the outcome — the revealed Info text, a generic Trap confirmation, or the
+ * Quiz question plus its AI-answer result — via a plain notification dialog.
+ *
+ * @param {number|null} targetslot Field slot the effect targets, or null for none.
+ * @returns {Promise<void>}
+ */
+const finalizeLoreActivation = async(targetslot) => {
+    await callLoreActivationWs(selectedLoreMethod, selectedLoreSlot, targetslot);
+};
+
+/**
+ * Calls activate_lore or activate_quiz and reports the outcome.
+ *
+ * @param {string} method 'activate_lore' or 'activate_quiz'.
+ * @param {number} loreslot Own Lore slot being activated.
+ * @param {number|null} targetslot Field slot the effect targets, or null for none.
+ * @returns {Promise<void>}
+ */
+const callLoreActivationWs = async(method, loreslot, targetslot) => {
+    try {
+        const args = {cmid, token: currentToken, loreslot, targetslot: targetslot ?? -1};
+        const result = method === 'activate_quiz'
+            ? await callWs('mod_playercards_activate_quiz', args)
+            : await callWs('mod_playercards_activate_lore', args);
+
+        if (method === 'activate_quiz') {
+            const message = result.aicorrect
+                ? await getString('aicorrectresult', 'mod_playercards', result.lpchange)
+                : `${result.questiontext}\n\n${strings.wrongansweractivated}`;
+            Notification.alert(strings.lorequiz, message);
+        } else {
+            Notification.alert(strings.loreinfo, result.revealedcontent || strings.effectapplied);
+        }
+
+        await showState(result);
     } catch (error) {
         Notification.alert(strings.error, error.message);
     }
@@ -624,6 +923,52 @@ const onChangePosture = async() => {
             cmid,
             token: currentToken,
             fieldslot: selectedAttackerSlot,
+        });
+        await showState(state);
+    } catch (error) {
+        Notification.alert(strings.error, error.message);
+    }
+};
+
+/**
+ * Handles clicking an own field slot while a Class Promotion selection is in progress:
+ * the first two clicks (on distinct occupied slots) choose the sacrifices, the third
+ * chooses the target, and re-clicking the target slot does nothing further (the ATK/DEF
+ * choice buttons finish the action instead — see onFinalizePromotion()).
+ *
+ * @param {number} index Field slot index.
+ * @returns {void}
+ */
+const onPromotionFieldClick = (index) => {
+    const slot = currentState.humanfield[index];
+    if (!slot.occupied || promotionSacrifices.includes(index)) {
+        return;
+    }
+
+    if (promotionSacrifices.length < 2) {
+        promotionSacrifices.push(index);
+    } else if (promotionTarget === null) {
+        promotionTarget = index;
+    }
+
+    refreshSelectionUi();
+};
+
+/**
+ * Finalises a Class Promotion once both sacrifices and the target are chosen, spending
+ * the stat choice the player just made.
+ *
+ * @param {string} statchoice 'atk' or 'def'.
+ * @returns {Promise<void>}
+ */
+const onFinalizePromotion = async(statchoice) => {
+    try {
+        const state = await callWs('mod_playercards_class_promotion', {
+            cmid,
+            token: currentToken,
+            sacrifices: promotionSacrifices.map((slotindex) => ({source: 'field', ref: String(slotindex)})),
+            target: {source: 'field', ref: String(promotionTarget)},
+            statchoice,
         });
         await showState(state);
     } catch (error) {

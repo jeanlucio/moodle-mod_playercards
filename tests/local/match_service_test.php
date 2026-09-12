@@ -614,4 +614,333 @@ final class match_service_test extends \advanced_testcase {
         $this->expectException(\moodle_exception::class);
         match_service::declare_attack($cmid, $userid, $state['token'], 1, null);
     }
+
+    /**
+     * Inserts a Lore card row.
+     *
+     * @param int $playercardsid Instance id.
+     * @param string $subtype info | quiz | trap.
+     * @param string $effecttype Effect identifier.
+     * @param int $effectvalue Effect magnitude.
+     * @param string $category Content category (own pool).
+     * @param string|null $difficulty easy | medium | hard, required for quiz.
+     * @return int
+     */
+    private function insert_lore_card(
+        int $playercardsid,
+        string $subtype,
+        string $effecttype,
+        int $effectvalue,
+        string $category = 'test',
+        ?string $difficulty = null
+    ): int {
+        global $DB;
+
+        return $DB->insert_record('playercards_lore', (object) [
+            'playercardsid' => $playercardsid,
+            'subtype' => $subtype,
+            'name' => 'Test ' . $subtype,
+            'content' => 'Content.',
+            'effecttype' => $effecttype,
+            'effectvalue' => $effectvalue,
+            'maxcopies' => 3,
+            'difficulty' => $difficulty,
+            'questionsource' => $subtype !== 'trap' ? 'own' : null,
+            'questioncategory' => $subtype !== 'trap' ? $category : null,
+            'createdby' => 2,
+            'timecreated' => time(),
+            'timemodified' => time(),
+        ]);
+    }
+
+    /**
+     * set_lore() places the card face-down in the chosen slot and removes it from hand.
+     *
+     * @return void
+     */
+    public function test_set_lore_places_card_and_removes_from_hand(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $loreid = $this->insert_lore_card((int) $instance->id, 'trap', 'lp_damage', 400);
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanhand'][] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::set_lore($cmid, $userid, $state['token'], 'lorecard', 2);
+
+        $this->assertNotNull($result['humanlore'][2]);
+        $this->assertTrue($result['humanlore'][2]['facedown']);
+        $this->assertNotContains('lorecard', array_column($result['humanhand'], 'uid'));
+    }
+
+    /**
+     * Activating an Info card reveals its sampled content and applies its effect
+     * unconditionally (SCOPE.md 4.6).
+     *
+     * @return void
+     */
+    public function test_activate_lore_info_reveals_content_and_applies_effect(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $DB->insert_record('playercards_questions', (object) [
+            'playercardsid' => $instance->id,
+            'category' => 'test',
+            'qtype' => 'description',
+            'questiontext' => 'Revealed fact.',
+            'answers' => null,
+            'approved' => 1,
+            'addedby' => 2,
+            'timecreated' => time(),
+            'timemodified' => time(),
+        ]);
+        $loreid = $this->insert_lore_card((int) $instance->id, 'info', 'atk_buff', 300);
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanfield'][0] = $this->field_entry('vet', $guardianids[0], 'attack');
+        $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::activate_lore($cmid, $userid, $state['token'], 1, 0);
+
+        $this->assertSame('Revealed fact.', $result['revealedcontent']);
+        $this->assertSame(300, $result['state']['humanfield'][0]['atkbonus']);
+        $this->assertNull($result['state']['humanlore'][1]);
+    }
+
+    /**
+     * A Trap card applies its effect with no revealed content at all (SCOPE.md 4.6).
+     *
+     * @return void
+     */
+    public function test_activate_lore_trap_applies_effect_without_content(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $loreid = $this->insert_lore_card((int) $instance->id, 'trap', 'lp_damage', 400);
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::activate_lore($cmid, $userid, $state['token'], 1, null);
+
+        $this->assertSame('', $result['revealedcontent']);
+        $this->assertSame(9600, $result['state']['lifepoints']['ai']);
+    }
+
+    /**
+     * activate_lore() refuses a Quiz card — it must go through activate_quiz() instead.
+     *
+     * @return void
+     */
+    public function test_activate_lore_rejects_quiz_card(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $loreid = $this->insert_lore_card((int) $instance->id, 'quiz', 'lp_damage', 400, 'test', 'easy');
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
+        $this->inject_state($cmid, $userid, $state);
+
+        $this->expectException(\moodle_exception::class);
+        match_service::activate_lore($cmid, $userid, $state['token'], 1, null);
+    }
+
+    /**
+     * activate_quiz() with the match on 'hard' AI difficulty deterministically answers
+     * correctly (guess_probability() is 1.0 for hard), healing the AI by its own
+     * difficulty-scaled bonus and discarding the card with no effect applied.
+     *
+     * @return void
+     */
+    public function test_activate_quiz_ai_correct_heals_ai(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $DB->insert_record('playercards_questions', (object) [
+            'playercardsid' => $instance->id,
+            'category' => 'test',
+            'qtype' => 'truefalse',
+            'questiontext' => 'The sky is blue.',
+            'answers' => json_encode([
+                ['text' => 'True', 'correct' => true],
+                ['text' => 'False', 'correct' => false],
+            ]),
+            'approved' => 1,
+            'addedby' => 2,
+            'timecreated' => time(),
+            'timemodified' => time(),
+        ]);
+        $loreid = $this->insert_lore_card((int) $instance->id, 'quiz', 'lp_damage', 400, 'test', 'medium');
+
+        $started = match_service::start_match($instance, $cmid, $userid, 'hard');
+        $state = match_service::mulligan($cmid, $userid, $started['token'], true);
+        $state['activeplayer'] = 'human';
+        $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::activate_quiz($cmid, $userid, $state['token'], 1, null);
+
+        $this->assertTrue($result['aicorrect']);
+        $this->assertSame(500, $result['lpchange']);
+        $this->assertSame(10500, $result['state']['lifepoints']['ai']);
+        $this->assertSame(10000, $result['state']['lifepoints']['human']);
+        $this->assertNull($result['state']['humanlore'][1]);
+    }
+
+    /**
+     * class_promotion() spends a pending authorization, removes both sacrifices (one
+     * from the field, one from hand) and permanently boosts a third own Guardian already
+     * in play (SCOPE.md 4.3).
+     *
+     * @return void
+     */
+    public function test_class_promotion_boosts_field_target_and_clears_authorization(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanfield'][0] = $this->field_entry('sac1', $guardianids[0], 'attack');
+        $state['humanfield'][1] = $this->field_entry('target', $guardianids[1], 'defense');
+        $state['humanhand'][] = ['uid' => 'sac2', 'cardtype' => 'guardian', 'cardid' => $guardianids[2]];
+        $state['pendingpromotion'] = ['bonus' => 400];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::class_promotion(
+            $cmid,
+            $userid,
+            $state['token'],
+            [['source' => 'field', 'ref' => '0'], ['source' => 'hand', 'ref' => 'sac2']],
+            ['source' => 'field', 'ref' => '1'],
+            'def'
+        );
+
+        $this->assertNull($result['humanfield'][0]);
+        $this->assertNotContains('sac2', array_column($result['humanhand'], 'uid'));
+        $this->assertSame(400, $result['humanfield'][1]['defbonus']);
+        $this->assertArrayNotHasKey('pendingpromotion', $result);
+    }
+
+    /**
+     * A target coming from hand enters the field as a Special Summon: it does not
+     * consume the normal muster, but still carries summoning sickness (SCOPE.md 4.2, 4.3).
+     *
+     * @return void
+     */
+    public function test_class_promotion_special_summons_hand_target(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanfield'][0] = $this->field_entry('sac1', $guardianids[0], 'attack');
+        $state['humanhand'][] = ['uid' => 'sac2', 'cardtype' => 'guardian', 'cardid' => $guardianids[1]];
+        $state['humanhand'][] = ['uid' => 'target', 'cardtype' => 'guardian', 'cardid' => $guardianids[2]];
+        $state['pendingpromotion'] = ['bonus' => 500];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::class_promotion(
+            $cmid,
+            $userid,
+            $state['token'],
+            [['source' => 'field', 'ref' => '0'], ['source' => 'hand', 'ref' => 'sac2']],
+            ['source' => 'hand', 'ref' => 'target'],
+            'atk'
+        );
+
+        // The sacrificed field slot (0) is now empty, so the Special-Summoned target
+        // lands there.
+        $this->assertNotNull($result['humanfield'][0]);
+        $this->assertSame($guardianids[2], $result['humanfield'][0]['cardid']);
+        $this->assertTrue($result['humanfield'][0]['sick']);
+        $this->assertSame(500, $result['humanfield'][0]['atkbonus']);
+        $this->assertFalse($result['musterusedthisturn']);
+    }
+
+    /**
+     * class_promotion() is rejected without a pending authorization, and rejects two
+     * sacrifices both coming from hand (SCOPE.md 4.3 — at least one must be in play).
+     *
+     * @return void
+     */
+    public function test_class_promotion_rejects_without_authorization_and_two_hand_sacrifices(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanhand'][] = ['uid' => 'sac1', 'cardtype' => 'guardian', 'cardid' => $guardianids[0]];
+        $state['humanhand'][] = ['uid' => 'sac2', 'cardtype' => 'guardian', 'cardid' => $guardianids[1]];
+        $state['humanhand'][] = ['uid' => 'target', 'cardtype' => 'guardian', 'cardid' => $guardianids[2]];
+        $this->inject_state($cmid, $userid, $state);
+
+        $sacrifices = [['source' => 'hand', 'ref' => 'sac1'], ['source' => 'hand', 'ref' => 'sac2']];
+        $target = ['source' => 'hand', 'ref' => 'target'];
+
+        try {
+            match_service::class_promotion($cmid, $userid, $state['token'], $sacrifices, $target, 'atk');
+            $this->fail('Expected a moodle_exception without a pending authorization.');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('error_promotionnotauthorized', $e->errorcode);
+        }
+
+        $state['pendingpromotion'] = ['bonus' => 300];
+        $this->inject_state($cmid, $userid, $state);
+
+        try {
+            match_service::class_promotion($cmid, $userid, $state['token'], $sacrifices, $target, 'atk');
+            $this->fail('Expected a moodle_exception for two hand-only sacrifices.');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('error_needfieldsacrifice', $e->errorcode);
+        }
+    }
 }

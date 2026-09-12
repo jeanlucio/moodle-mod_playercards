@@ -73,6 +73,12 @@ class match_structures {
             'atk' => new external_value(PARAM_INT, 'Guardian attack points', VALUE_DEFAULT, 0),
             'def' => new external_value(PARAM_INT, 'Guardian defence points', VALUE_DEFAULT, 0),
             'subtype' => new external_value(PARAM_ALPHA, 'info | quiz | trap', VALUE_DEFAULT, ''),
+            'effecttype' => new external_value(
+                PARAM_ALPHANUMEXT,
+                'Lore effect identifier, visible only for the viewer\'s own Lore slots',
+                VALUE_DEFAULT,
+                ''
+            ),
             'posture' => new external_value(PARAM_ALPHA, 'attack | defense, Guardian slots only', VALUE_DEFAULT, ''),
             'facedown' => new external_value(PARAM_BOOL, 'Whether a Lore slot is still hidden', VALUE_DEFAULT, false),
             'sick' => new external_value(
@@ -91,12 +97,15 @@ class match_structures {
     }
 
     /**
-     * Structure of the full match state as sent to the client.
+     * The full match-state field definitions, as a plain array — shared by
+     * match_state_structure() and by any Web service (activate_lore, activate_quiz) that
+     * needs to return the match state plus its own extra fields in a single
+     * external_single_structure.
      *
-     * @return external_single_structure
+     * @return array
      */
-    public static function match_state_structure(): external_single_structure {
-        return new external_single_structure([
+    public static function match_state_fields(): array {
+        return [
             'hasmatch' => new external_value(PARAM_BOOL, 'Whether a match is currently in progress'),
             'token' => new external_value(PARAM_ALPHANUMEXT, 'Match token', VALUE_DEFAULT, ''),
             'difficulty' => new external_value(PARAM_ALPHA, 'easy | normal | hard', VALUE_DEFAULT, ''),
@@ -115,6 +124,18 @@ class match_structures {
                 'Whether the active player already changed a Guardian\'s posture this turn',
                 VALUE_DEFAULT,
                 false
+            ),
+            'haspendingpromotion' => new external_value(
+                PARAM_BOOL,
+                'Whether a Class Promotion authorization is currently available to spend',
+                VALUE_DEFAULT,
+                false
+            ),
+            'pendingpromotionbonus' => new external_value(
+                PARAM_INT,
+                'ATK/DEF bonus the pending Class Promotion would grant, 0 if none pending',
+                VALUE_DEFAULT,
+                0
             ),
             'lifepoints' => new external_single_structure(
                 [
@@ -138,6 +159,15 @@ class match_structures {
             'humanlore' => new external_multiple_structure(self::slot_structure(), 'Human Lore slots', VALUE_DEFAULT, []),
             'aifield' => new external_multiple_structure(self::slot_structure(), 'AI Guardian slots', VALUE_DEFAULT, []),
             'ailore' => new external_multiple_structure(self::slot_structure(), 'AI Lore slots', VALUE_DEFAULT, []),
-        ]);
+        ];
+    }
+
+    /**
+     * Structure of the full match state as sent to the client.
+     *
+     * @return external_single_structure
+     */
+    public static function match_state_structure(): external_single_structure {
+        return new external_single_structure(self::match_state_fields());
     }
 }

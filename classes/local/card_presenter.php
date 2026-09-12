@@ -92,11 +92,18 @@ class card_presenter {
      * slot_structure() shape the Web service response needs, batching every guardian/lore
      * lookup across all given zones into a single pair of queries.
      *
+     * A face-down Lore card only hides its name/subtype from its *owner's opponent* — a
+     * player always knows what they themselves placed, same as any physical card game.
+     * $ownzones names the zones the viewing player owns (e.g. ['humanfield', 'humanlore']
+     * from the human player's own perspective); every other zone still masks a face-down
+     * Lore card's identity.
+     *
      * @param array $zones Zone name => list of (null|array) raw slots, e.g.
      *  ['humanfield' => [...], 'humanlore' => [...], 'aifield' => [...], 'ailore' => [...]].
+     * @param string[] $ownzones Names of the zones belonging to the viewing player.
      * @return array Same zone names, each an array of slot_structure()-shaped entries.
      */
-    public static function hydrate_zones(array $zones): array {
+    public static function hydrate_zones(array $zones, array $ownzones): array {
         global $DB;
 
         $guardianids = [];
@@ -131,6 +138,7 @@ class card_presenter {
             'atk' => 0,
             'def' => 0,
             'subtype' => '',
+            'effecttype' => '',
             'posture' => '',
             'facedown' => false,
             'sick' => false,
@@ -146,10 +154,11 @@ class card_presenter {
                     continue;
                 }
 
-                $facedown = (bool) ($slot['facedown'] ?? false);
+                $facedown = (bool) ($slot['facedown'] ?? false) && !in_array($zonename, $ownzones, true);
 
                 if ($slot['cardtype'] === 'guardian') {
                     $card = $guardians[$slot['cardid']] ?? null;
+                    [$atk, $def] = $card !== null ? self::effective_stats($card, $slot) : [0, 0];
                     $hydrated[] = array_merge($emptyslot, [
                         'occupied' => true,
                         'uid' => $slot['uid'],
@@ -157,8 +166,8 @@ class card_presenter {
                         'cardid' => (int) $slot['cardid'],
                         'name' => $card !== null ? format_string($card->name) : '',
                         'level' => $card !== null ? (int) $card->level : 0,
-                        'atk' => $card !== null ? (int) $card->atk : 0,
-                        'def' => $card !== null ? (int) $card->def : 0,
+                        'atk' => $atk,
+                        'def' => $def,
                         'posture' => $slot['posture'] ?? '',
                         'sick' => (bool) ($slot['sick'] ?? false),
                         'attackedthisturn' => (bool) ($slot['attackedthisturn'] ?? false),
@@ -172,6 +181,7 @@ class card_presenter {
                         'cardid' => (int) $slot['cardid'],
                         'name' => $facedown || $card === null ? '' : format_string($card->name),
                         'subtype' => $facedown || $card === null ? '' : $card->subtype,
+                        'effecttype' => $facedown || $card === null ? '' : $card->effecttype,
                         'facedown' => $facedown,
                     ]);
                 }
@@ -180,5 +190,22 @@ class card_presenter {
         }
 
         return $result;
+    }
+
+    /**
+     * Computes a Guardian's effective ATK/DEF: its catalog base plus any permanent
+     * Class Promotion bonus (SCOPE.md 4.3) stored on its own field slot. The bonus can
+     * push a Guardian's power above its level's normal ceiling (400 x level) — intentional,
+     * the whole point of the effect — and never changes the printed level itself.
+     *
+     * @param \stdClass $card Guardian catalog record.
+     * @param array $slot Raw field slot entry, with optional 'atkbonus'/'defbonus' keys.
+     * @return array{0: int, 1: int} [atk, def].
+     */
+    public static function effective_stats(\stdClass $card, array $slot): array {
+        return [
+            (int) $card->atk + (int) ($slot['atkbonus'] ?? 0),
+            (int) $card->def + (int) ($slot['defbonus'] ?? 0),
+        ];
     }
 }

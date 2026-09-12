@@ -75,7 +75,7 @@
 
 .path-mod-playercards .playercards-slot {
     width: 5rem;
-    height: 6.5rem;
+    min-height: 6.5rem;
     border: 1px dashed var(--card-border-color, #999);
     border-radius: 0.25rem;
 }
@@ -88,6 +88,13 @@
 
 .path-mod-playercards .playercards-slot-empty {
     cursor: default;
+}
+
+.path-mod-playercards .playercards-slot-lore {
+    border-style: solid;
+    padding: 0.25rem;
+    cursor: pointer;
+    background: var(--card-bg, #fff);
 }
 
 .path-mod-playercards .playercards-card {
@@ -136,4 +143,13 @@
 .path-mod-playercards .playercards-posture-toggle {
     display: flex;
     gap: 0.25rem;
+}
+
+.path-mod-playercards .playercards-promotion-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-block-end: 0.5rem;
 }

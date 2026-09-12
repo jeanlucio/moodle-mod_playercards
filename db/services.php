@@ -17,10 +17,11 @@
 /**
  * External function definitions for mod_playercards.
  *
- * mark_intro_seen was added in Fase 2. start_match/mulligan/get_state (Etapa 1) and
- * muster_guardian/change_posture/declare_attack (Etapa 2) cover 6 of the 16 gameplay/
- * content endpoints from SCOPE.md 7 — the remaining ones are added across the rest of
- * Fase 3/4.
+ * mark_intro_seen was added in Fase 2. start_match/mulligan/get_state (Etapa 1),
+ * muster_guardian/change_posture/declare_attack (Etapa 2) and set_lore/activate_lore/
+ * activate_quiz/class_promotion (Etapa 3) cover 10 of the 16 gameplay/content endpoints
+ * from SCOPE.md 7 — the remaining ones (submit_quiz_answer and end_turn, plus the
+ * collection/shop/deckbuilder group) are added across the rest of Fase 3/4.
  *
  * @package    mod_playercards
  * @copyright  2026 Jean Lúcio
@@ -81,6 +82,38 @@ $functions = [
     'mod_playercards_declare_attack' => [
         'classname'     => 'mod_playercards\external\declare_attack',
         'description'   => 'Declares an attack from one own Guardian.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_set_lore' => [
+        'classname'     => 'mod_playercards\external\set_lore',
+        'description'   => 'Places a Lore card from hand face-down.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_activate_lore' => [
+        'classname'     => 'mod_playercards\external\activate_lore',
+        'description'   => 'Activates a face-down Info or Trap Lore card.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_activate_quiz' => [
+        'classname'     => 'mod_playercards\external\activate_quiz',
+        'description'   => 'Activates a face-down Quiz Lore card and resolves the AI\'s answer.',
+        'type'          => 'write',
+        'ajax'          => true,
+        'capabilities'  => 'mod/playercards:view',
+        'loginrequired' => true,
+    ],
+    'mod_playercards_class_promotion' => [
+        'classname'     => 'mod_playercards\external\class_promotion',
+        'description'   => 'Executes a Class Promotion using a previously granted authorization.',
         'type'          => 'write',
         'ajax'          => true,
         'capabilities'  => 'mod/playercards:view',

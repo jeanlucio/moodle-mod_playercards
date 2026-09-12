@@ -37,10 +37,13 @@ use cache_store;
  * PlayerCards instance open keeps each match separate. Only a finished match becomes a
  * {playercards_attempts} row (a later stage of Fase 3/4, not built yet).
  *
- * Etapa 2 of Fase 3 (SCOPE.md 16) adds Guardian muster (normal and sacrificial), posture
- * changes and combat. Lore actions (set_lore/activate_lore/activate_quiz/
- * class_promotion) arrive in Etapa 3 — until then the Lore zone stays empty, and every
- * mutating method here only ever needs to reason about Guardian field slots.
+ * Etapa 3 of Fase 3 (SCOPE.md 16) adds Lore cards: set_lore(), activate_lore() (Info/Trap),
+ * activate_quiz() (Quiz, with the AI auto-answering — see ai_quiz_answer) and
+ * class_promotion(). submit_quiz_answer (SCOPE.md 7) is not built yet: the only reachable
+ * activation path in V1 so far is the human activating their own Lore, which the AI
+ * always "answers" itself via ai_quiz_answer's probability roll — a real pending question
+ * for the human to answer only becomes reachable once the AI can activate Lore on its own
+ * turn, which needs the AI play logic a later etapa builds.
  *
  * V1 does not enforce the Principal/Combate phase split from SCOPE.md 4.1 as two
  * distinct states: muster_guardian(), change_posture() and declare_attack() are all
@@ -260,12 +263,15 @@ class match_service {
             return ['hasmatch' => false];
         }
 
-        $zones = card_presenter::hydrate_zones([
-            'humanfield' => $state['humanfield'],
-            'humanlore' => $state['humanlore'],
-            'aifield' => $state['aifield'],
-            'ailore' => $state['ailore'],
-        ]);
+        $zones = card_presenter::hydrate_zones(
+            [
+                'humanfield' => $state['humanfield'],
+                'humanlore' => $state['humanlore'],
+                'aifield' => $state['aifield'],
+                'ailore' => $state['ailore'],
+            ],
+            ['humanfield', 'humanlore']
+        );
 
         return [
             'hasmatch' => true,
@@ -277,6 +283,8 @@ class match_service {
             'turnnumber' => $state['turnnumber'],
             'musterusedthisturn' => (bool) ($state['musterusedthisturn'] ?? false),
             'postureusedthisturn' => (bool) ($state['postureusedthisturn'] ?? false),
+            'haspendingpromotion' => isset($state['pendingpromotion']),
+            'pendingpromotionbonus' => (int) ($state['pendingpromotion']['bonus'] ?? 0),
             'lifepoints' => $state['lifepoints'],
             'humanhand' => card_presenter::hydrate($state['humanhand']),
             'aihandcount' => count($state['aihand']),
@@ -369,6 +377,8 @@ class match_service {
             'posture' => $posture,
             'sick' => true,
             'attackedthisturn' => false,
+            'atkbonus' => 0,
+            'defbonus' => 0,
         ];
         $state['musterusedthisturn'] = true;
 
@@ -453,12 +463,13 @@ class match_service {
             '*',
             MUST_EXIST
         );
+        [$attackeratk] = card_presenter::effective_stats($attackercard, $attacker);
 
         if ($targetslot === null) {
             if (self::field_has_guardian($state['aifield'])) {
                 throw new \moodle_exception('error_musttargetguardian', 'mod_playercards');
             }
-            $state['lifepoints']['ai'] -= combat_engine::resolve_direct_attack((int) $attackercard->atk);
+            $state['lifepoints']['ai'] -= combat_engine::resolve_direct_attack($attackeratk);
         } else {
             if (
                 $targetslot < 0
@@ -475,11 +486,12 @@ class match_service {
                 '*',
                 MUST_EXIST
             );
+            [$defenderatk, $defenderdef] = card_presenter::effective_stats($defendercard, $defender);
 
             $result = combat_engine::resolve_combat(
-                (int) $attackercard->atk,
-                (int) $defendercard->atk,
-                (int) $defendercard->def,
+                $attackeratk,
+                $defenderatk,
+                $defenderdef,
                 $defender['posture'] === 'attack'
             );
 
@@ -503,6 +515,266 @@ class match_service {
     }
 
     /**
+     * Places a Lore card from hand face-down into an empty Lore zone slot. Only limited
+     * by available slots (SCOPE.md 4.1) — unlike muster, there is no once-per-turn cap.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param string $handuid Uid of the Lore card in hand.
+     * @param int $loreslot Target Lore slot, 0 to FIELD_SLOTS-1.
+     * @return array Updated match state.
+     */
+    public static function set_lore(int $cmid, int $userid, string $token, string $handuid, int $loreslot): array {
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        if ($loreslot < 0 || $loreslot >= self::FIELD_SLOTS || $state['humanlore'][$loreslot] !== null) {
+            throw new \moodle_exception('error_slotoccupied', 'mod_playercards');
+        }
+
+        $handindex = self::find_hand_index($state['humanhand'], $handuid);
+        if ($handindex === null || $state['humanhand'][$handindex]['cardtype'] !== 'lore') {
+            throw new \moodle_exception('error_invalidhandcard', 'mod_playercards');
+        }
+
+        $handcard = $state['humanhand'][$handindex];
+        array_splice($state['humanhand'], $handindex, 1);
+        $state['humanlore'][$loreslot] = [
+            'uid' => $handcard['uid'],
+            'cardtype' => 'lore',
+            'cardid' => $handcard['cardid'],
+            'facedown' => true,
+        ];
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Activates a face-down Info or Trap Lore card (SCOPE.md 4.6): reveals its content
+     * (Info only) and applies its effect unconditionally, then discards it. Quiz cards
+     * must go through activate_quiz() instead.
+     *
+     * Not gated by whose turn it is — Lore activates at instant speed, any time
+     * (SCOPE.md 4.6). V1 only reaches this from the human's own Lore zone, since the AI
+     * cannot activate Lore of its own yet.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param int $loreslot Own Lore slot to activate.
+     * @param int|null $targetslot Field slot the effect targets, required only for
+     *  effects that need one (atk_buff/def_buff/destroy).
+     * @return array ['state' => array, 'revealedcontent' => string].
+     */
+    public static function activate_lore(
+        int $cmid,
+        int $userid,
+        string $token,
+        int $loreslot,
+        ?int $targetslot
+    ): array {
+        global $DB;
+
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_match_started($state);
+
+        $slot = self::require_own_lore_slot($state, $loreslot);
+        $lorecard = $DB->get_record('playercards_lore', ['id' => $slot['cardid']], '*', MUST_EXIST);
+
+        if ($lorecard->subtype === 'quiz') {
+            throw new \moodle_exception('error_useactivatequiz', 'mod_playercards');
+        }
+
+        $revealedcontent = $lorecard->subtype === 'info' ? lore_content_sampler::sample_info($lorecard) : '';
+
+        $state = lore_effect_resolver::apply(
+            $state,
+            'human',
+            $lorecard->effecttype,
+            (int) $lorecard->effectvalue,
+            $targetslot
+        );
+        $state['humanlore'][$loreslot] = null;
+
+        self::save_state($cmid, $userid, $state);
+
+        return ['state' => $state, 'revealedcontent' => $revealedcontent];
+    }
+
+    /**
+     * Activates a face-down Quiz Lore card (SCOPE.md 4.6): reveals a question sampled
+     * from its category and immediately resolves the AI's answer via
+     * ai_quiz_answer::guess_probability(). A correct AI answer discards the card and
+     * heals the AI by the card's own difficulty-scaled bonus; a wrong answer applies the
+     * card's effect against the AI (via lore_effect_resolver, same as activate_lore) and
+     * discards it either way.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param int $loreslot Own Lore slot to activate.
+     * @param int|null $targetslot Field slot the effect targets if the AI answers wrong,
+     *  required only for effects that need one.
+     * @return array ['state' => array, 'questiontext' => string, 'options' => string[],
+     *  'correctindex' => int, 'aicorrect' => bool, 'lpchange' => int].
+     */
+    public static function activate_quiz(
+        int $cmid,
+        int $userid,
+        string $token,
+        int $loreslot,
+        ?int $targetslot
+    ): array {
+        global $DB;
+
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_match_started($state);
+
+        $slot = self::require_own_lore_slot($state, $loreslot);
+        $lorecard = $DB->get_record('playercards_lore', ['id' => $slot['cardid']], '*', MUST_EXIST);
+
+        if ($lorecard->subtype !== 'quiz') {
+            throw new \moodle_exception('error_notquizcard', 'mod_playercards');
+        }
+
+        $question = lore_content_sampler::sample_quiz($lorecard);
+        $qtype = count($question['options']) === 2 ? 'truefalse' : 'multichoice';
+        $probability = ai_quiz_answer::guess_probability($state['difficulty'], $qtype);
+        $aicorrect = ai_quiz_answer::is_correct($probability, mt_rand() / mt_getrandmax());
+
+        if ($aicorrect) {
+            $lpchange = ai_quiz_answer::correct_answer_bonus($lorecard->difficulty);
+            $state['lifepoints']['ai'] += $lpchange;
+        } else {
+            $lpchange = -(int) $lorecard->effectvalue;
+            $state = lore_effect_resolver::apply(
+                $state,
+                'human',
+                $lorecard->effecttype,
+                (int) $lorecard->effectvalue,
+                $targetslot
+            );
+        }
+        $state['humanlore'][$loreslot] = null;
+
+        self::save_state($cmid, $userid, $state);
+
+        return [
+            'state' => $state,
+            'questiontext' => $question['questiontext'],
+            'options' => $question['options'],
+            'correctindex' => $question['correctindex'],
+            'aicorrect' => $aicorrect,
+            'lpchange' => $lpchange,
+        ];
+    }
+
+    /**
+     * Executes a Class Promotion (SCOPE.md 4.3), spending a previously-granted
+     * authorization (from an Info Lore's unconditional activation, or a Quiz Lore's
+     * wrong AI answer — both set state['pendingpromotion'] via lore_effect_resolver).
+     * Sacrifices 2 own Guardians (at least one already in play) and permanently boosts a
+     * third's ATK or DEF. If the target came from hand, its entry to the field is a
+     * Special Summon: it does not consume the turn's normal muster, but still carries
+     * summoning sickness like any other newly-arrived Guardian.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param string $token Match token.
+     * @param array $sacrifices Exactly 2 entries, each ['source' => 'hand'|'field', 'ref' => string|int]
+     *  (hand uid, or field slot index).
+     * @param array $target ['source' => 'hand'|'field', 'ref' => string|int] — the Guardian to boost.
+     * @param string $statchoice 'atk' or 'def'.
+     * @return array Updated match state.
+     */
+    public static function class_promotion(
+        int $cmid,
+        int $userid,
+        string $token,
+        array $sacrifices,
+        array $target,
+        string $statchoice
+    ): array {
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        if (!isset($state['pendingpromotion'])) {
+            throw new \moodle_exception('error_promotionnotauthorized', 'mod_playercards');
+        }
+        if (count($sacrifices) !== 2) {
+            throw new \moodle_exception('error_needtwosacrifices', 'mod_playercards');
+        }
+        if (!in_array($statchoice, ['atk', 'def'], true)) {
+            throw new \moodle_exception('error_invalidposture', 'mod_playercards');
+        }
+
+        $fieldsacrifices = array_filter($sacrifices, static fn(array $s): bool => $s['source'] === 'field');
+        if (count($fieldsacrifices) < 1) {
+            throw new \moodle_exception('error_needfieldsacrifice', 'mod_playercards');
+        }
+
+        // Resolve and remove both sacrifices before touching the target, so a target
+        // coming from hand can land in a slot one of them just vacated.
+        foreach ($sacrifices as $sacrifice) {
+            if ($sacrifice['source'] === 'field') {
+                self::require_own_guardian_slot($state, (int) $sacrifice['ref']);
+                $state['humanfield'][(int) $sacrifice['ref']] = null;
+            } else {
+                $handindex = self::find_hand_index($state['humanhand'], (string) $sacrifice['ref']);
+                if ($handindex === null || $state['humanhand'][$handindex]['cardtype'] !== 'guardian') {
+                    throw new \moodle_exception('error_invalidhandcard', 'mod_playercards');
+                }
+                array_splice($state['humanhand'], $handindex, 1);
+            }
+        }
+
+        $bonus = (int) $state['pendingpromotion']['bonus'];
+        $bonuskey = $statchoice === 'atk' ? 'atkbonus' : 'defbonus';
+
+        if ($target['source'] === 'field') {
+            $targetslot = (int) $target['ref'];
+            $entry = self::require_own_guardian_slot($state, $targetslot);
+            $entry[$bonuskey] = (int) ($entry[$bonuskey] ?? 0) + $bonus;
+            $state['humanfield'][$targetslot] = $entry;
+        } else {
+            $handindex = self::find_hand_index($state['humanhand'], (string) $target['ref']);
+            if ($handindex === null || $state['humanhand'][$handindex]['cardtype'] !== 'guardian') {
+                throw new \moodle_exception('error_invalidhandcard', 'mod_playercards');
+            }
+            $handcard = $state['humanhand'][$handindex];
+            array_splice($state['humanhand'], $handindex, 1);
+
+            $emptyslot = self::find_empty_slot($state['humanfield']);
+            if ($emptyslot === null) {
+                throw new \moodle_exception('error_slotoccupied', 'mod_playercards');
+            }
+            $state['humanfield'][$emptyslot] = [
+                'uid' => $handcard['uid'],
+                'cardtype' => 'guardian',
+                'cardid' => $handcard['cardid'],
+                'posture' => 'attack',
+                'sick' => true,
+                'attackedthisturn' => false,
+                'atkbonus' => $statchoice === 'atk' ? $bonus : 0,
+                'defbonus' => $statchoice === 'def' ? $bonus : 0,
+            ];
+        }
+
+        unset($state['pendingpromotion']);
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
      * Guards a mutating call to a Guardian action against the wrong turn/phase — every
      * one of muster_guardian()/change_posture()/declare_attack() needs exactly this
      * check.
@@ -514,6 +786,49 @@ class match_service {
         if ($state['phase'] !== 'main' || $state['activeplayer'] !== 'human') {
             throw new \moodle_exception('error_notyourturn', 'mod_playercards');
         }
+    }
+
+    /**
+     * Guards a Lore activation, which is instant-speed and not restricted to the
+     * activator's own turn (SCOPE.md 4.6) — only requires the match to have actually
+     * started (past the mulligan).
+     *
+     * @param array $state Current state.
+     * @return void
+     */
+    private static function require_match_started(array $state): void {
+        if ($state['phase'] !== 'main') {
+            throw new \moodle_exception('error_notyourturn', 'mod_playercards');
+        }
+    }
+
+    /**
+     * Validates that a given own Lore slot holds a face-down card, and returns it.
+     *
+     * @param array $state Current state.
+     * @param int $loreslot Lore slot to check.
+     * @return array The Lore entry.
+     */
+    private static function require_own_lore_slot(array $state, int $loreslot): array {
+        if ($loreslot < 0 || $loreslot >= self::FIELD_SLOTS || $state['humanlore'][$loreslot] === null) {
+            throw new \moodle_exception('error_emptyslot', 'mod_playercards');
+        }
+        return $state['humanlore'][$loreslot];
+    }
+
+    /**
+     * Finds the first empty slot in a field zone.
+     *
+     * @param array $field Field slots (null or Guardian entries).
+     * @return int|null
+     */
+    private static function find_empty_slot(array $field): ?int {
+        foreach ($field as $index => $slot) {
+            if ($slot === null) {
+                return $index;
+            }
+        }
+        return null;
     }
 
     /**

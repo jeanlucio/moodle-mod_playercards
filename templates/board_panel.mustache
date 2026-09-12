@@ -18,12 +18,15 @@
     @template mod_playercards/board_panel
 
     Renders the PlayerCards board in one of three states: no match in progress (lobby),
-    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapas 1-2). Every
-    boolean/list here is pre-computed client-side by amd/src/board.js from the raw
-    start_match/mulligan/get_state/muster_guardian/change_posture/declare_attack Web
-    Service response — this template stays logic-less. The contextual action bar
-    (posture choice during a muster, attack/change-posture/cancel buttons for a selected
-    Guardian) is built entirely in JS into #playercards-actionbar, not templated here.
+    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapas 1-3). Every
+    boolean/list here is pre-computed client-side by amd/src/board.js from the raw Web
+    service responses (start_match/mulligan/get_state/muster_guardian/change_posture/
+    declare_attack/set_lore/activate_lore/activate_quiz/class_promotion) — this template
+    stays logic-less. The contextual action bar (posture choice during a muster,
+    attack/change-posture/cancel buttons for a selected Guardian, the Class Promotion
+    sacrifice/target/stat picker) is built entirely in JS into #playercards-actionbar, not
+    templated here. Own Lore slots always reveal their name/subtype/facedown=false (a
+    player always knows what they placed); the opponent's stay facedown until removed.
 
     Example context (json):
     {
@@ -63,7 +66,17 @@
                 "index": 1, "occupied": true, "name": "Sentinela Novata", "atk": 400, "def": 0,
                 "posturelabel": "Defense posture", "sicklabel": "Summoned this turn"
             }
-        ]
+        ],
+        "ailoreslots": [
+            {"index": 0, "occupied": false},
+            {"index": 1, "occupied": true, "facedown": true}
+        ],
+        "humanloreslots": [
+            {"index": 0, "occupied": false},
+            {"index": 1, "occupied": true, "facedown": false, "name": "Fragmento de Sabedoria", "subtypelabel": "Info"}
+        ],
+        "haspendingpromotion": true,
+        "promotionlabel": "Class Promotion available (+400)"
     }
 }}
 {{#showlobby}}
@@ -137,20 +150,53 @@
                 {{/aislots}}
             </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
-                {{#fieldslots}}
-                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{loreslotlabel}}"></div>
-                {{/fieldslots}}
+                {{#ailoreslots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="ailore"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{#facedown}}{{#str}} activatelore, mod_playercards {{/str}}{{/facedown}}{{^facedown}}{{name}}{{/facedown}}{{/occupied}}{{^occupied}}{{../loreslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            {{^facedown}}
+                                <div class="playercards-card-name">{{name}}</div>
+                                <div class="playercards-card-subtype">{{subtypelabel}}</div>
+                            {{/facedown}}
+                        {{/occupied}}
+                    </div>
+                {{/ailoreslots}}
             </div>
             <div class="playercards-deckcount">{{aideckcount}}</div>
         </div>
+
+        {{#haspendingpromotion}}
+            <div class="playercards-promotion-banner alert alert-warning">
+                <span>{{promotionlabel}}</span>
+                <button type="button" class="btn btn-sm btn-warning" id="playercards-promote-btn">
+                    {{#str}} classpromotion, mod_playercards {{/str}}
+                </button>
+            </div>
+        {{/haspendingpromotion}}
 
         <div id="playercards-actionbar" class="playercards-actionbar"></div>
 
         <div class="playercards-zone playercards-zone-human">
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
-                {{#fieldslots}}
-                    <div class="playercards-slot playercards-slot-empty" role="listitem" aria-label="{{loreslotlabel}}"></div>
-                {{/fieldslots}}
+                {{#humanloreslots}}
+                    <div
+                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        role="listitem"
+                        data-zone="humanlore"
+                        data-slot="{{index}}"
+                        aria-label="{{#occupied}}{{name}}{{/occupied}}{{^occupied}}{{../loreslotlabel}}{{/occupied}}"
+                    >
+                        {{#occupied}}
+                            <div class="playercards-card-name">{{name}}</div>
+                            <div class="playercards-card-subtype">{{subtypelabel}}</div>
+                        {{/occupied}}
+                    </div>
+                {{/humanloreslots}}
             </div>
             <div class="playercards-slots" role="list" aria-label="{{#str}} guardianslots, mod_playercards {{/str}}">
                 {{#humanslots}}
