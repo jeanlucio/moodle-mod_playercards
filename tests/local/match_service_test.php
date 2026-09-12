@@ -33,6 +33,7 @@ use cache_store;
  *
  * @covers \mod_playercards\local\match_service
  * @covers \mod_playercards\local\ai_deck_builder
+ * @covers \mod_playercards\local\ai_player
  * @covers \mod_playercards\local\card_presenter
  */
 final class match_service_test extends \advanced_testcase {
@@ -942,5 +943,217 @@ final class match_service_test extends \advanced_testcase {
         } catch (\moodle_exception $e) {
             $this->assertSame('error_needfieldsacrifice', $e->errorcode);
         }
+    }
+
+    /**
+     * end_turn() closes the human's hand limit, lets the AI muster and attack, then
+     * opens the human's next turn — advancing turnnumber by 2 and drawing one card for
+     * each side along the way.
+     *
+     * @return void
+     */
+    public function test_end_turn_advances_turn_and_lets_ai_act(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['aihand'] = [['uid' => 'aig1', 'cardtype' => 'guardian', 'cardid' => $guardianids[0]]];
+        $state['aifield'] = array_fill(0, 5, null);
+        $state['humanfield'] = array_fill(0, 5, null);
+        $humandeckbefore = count($state['humandeck']);
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+
+        $this->assertFalse($result['finished']);
+        $this->assertSame('human', $result['activeplayer']);
+        $this->assertSame(3, $result['turnnumber']);
+        // The AI mustered its only Guardian instead of attacking (nothing was in play
+        // for it to attack with — the newly mustered card is summoning-sick).
+        $this->assertNotNull($result['aifield'][0]);
+        $this->assertSame($guardianids[0], $result['aifield'][0]['cardid']);
+        $this->assertSame(10000, $result['lifepoints']['human']);
+        // The human draws one card at the very end of end_turn(), for their next turn.
+        $this->assertCount($humandeckbefore - 1, $result['humandeck']);
+        $this->assertFalse($result['musterusedthisturn']);
+        $this->assertFalse($result['postureusedthisturn']);
+    }
+
+    /**
+     * The human's hand is trimmed to the maximum size at the end of their own turn, and
+     * the newly drawn card for their next turn is appended after the trim.
+     *
+     * @return void
+     */
+    public function test_end_turn_trims_human_hand_to_max_size(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humanhand'] = [];
+        for ($i = 0; $i < 8; $i++) {
+            $state['humanhand'][] = ['uid' => "extra{$i}", 'cardtype' => 'guardian', 'cardid' => $guardianids[0]];
+        }
+        $expectedkept = array_slice(array_column($state['humanhand'], 'uid'), 0, 6);
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+
+        $this->assertCount(7, $result['humanhand']);
+        $this->assertSame($expectedkept, array_slice(array_column($result['humanhand'], 'uid'), 0, 6));
+    }
+
+    /**
+     * When the AI's deck runs out before it would draw, the match ends immediately as a
+     * human win, and a {playercards_attempts} row is recorded.
+     *
+     * @return void
+     */
+    public function test_end_turn_ai_deck_out_ends_match_as_win(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['aideck'] = [];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+
+        $this->assertTrue($result['finished']);
+        $this->assertSame('win', $result['result']);
+
+        $attempt = $DB->get_record('playercards_attempts', ['playercardsid' => $instance->id, 'userid' => $userid]);
+        $this->assertNotFalse($attempt);
+        $this->assertSame('win', $attempt->result);
+        $this->assertSame(100.0, (float) $attempt->score);
+        $this->assertSame(2, (int) $attempt->turnsplayed);
+    }
+
+    /**
+     * When the human's deck runs out at the start of their next turn, the match ends
+     * immediately as a loss.
+     *
+     * @return void
+     */
+    public function test_end_turn_human_deck_out_ends_match_as_loss(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['humandeck'] = [];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+
+        $this->assertTrue($result['finished']);
+        $this->assertSame('loss', $result['result']);
+
+        $attempt = $DB->get_record('playercards_attempts', ['playercardsid' => $instance->id, 'userid' => $userid]);
+        $this->assertNotFalse($attempt);
+        $this->assertSame('loss', $attempt->result);
+        $this->assertSame(0.0, (float) $attempt->score);
+        $this->assertSame(3, (int) $attempt->turnsplayed);
+    }
+
+    /**
+     * Reaching the configured turn limit ends the match immediately, awarding the
+     * result to whoever has more life points at that moment (SCOPE.md 4.9).
+     *
+     * @return void
+     */
+    public function test_end_turn_maxturns_limit_ends_match_by_lifepoints(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module(
+            'playercards',
+            ['course' => $course->id, 'maxturns' => 1]
+        );
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['lifepoints'] = ['human' => 5000, 'ai' => 6000];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+
+        $this->assertTrue($result['finished']);
+        $this->assertSame('loss', $result['result']);
+    }
+
+    /**
+     * end_turn() is rejected once the match has already finished.
+     *
+     * @return void
+     */
+    public function test_end_turn_rejects_when_finished(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['finished'] = true;
+        $state['result'] = 'win';
+        $this->inject_state($cmid, $userid, $state);
+
+        $this->expectException(\moodle_exception::class);
+        match_service::end_turn($cmid, $userid, $instance, $state['token']);
+    }
+
+    /**
+     * end_turn() is rejected when it is not currently the human's turn.
+     *
+     * @return void
+     */
+    public function test_end_turn_rejects_when_not_humans_turn(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['activeplayer'] = 'ai';
+        $this->inject_state($cmid, $userid, $state);
+
+        $this->expectException(\moodle_exception::class);
+        match_service::end_turn($cmid, $userid, $instance, $state['token']);
     }
 }

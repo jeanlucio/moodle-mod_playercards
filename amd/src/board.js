@@ -15,11 +15,13 @@
 
 /**
  * Renders the PlayerCards board and drives match start/mulligan/muster/posture/combat/
- * Lore/Class Promotion (SCOPE.md 16, Fase 3 Etapas 1-3). submit_quiz_answer is not wired
- * up here: the only reachable activation path so far is the human activating their own
- * Quiz Lore, which the AI always answers itself (see activate_quiz()) — a real pending
- * question for the human to answer only becomes reachable once the AI can activate Lore
- * on its own turn.
+ * Lore/Class Promotion/end-turn (SCOPE.md 16, Fase 3 Etapas 1-4). submit_quiz_answer is
+ * not wired up here: the only reachable activation path so far is the human activating
+ * their own Quiz Lore, which the AI always answers itself (see activate_quiz()) — a real
+ * pending question for the human to answer only becomes reachable once the AI can
+ * activate Lore on its own turn. Once state.finished is true, the board stops binding any
+ * interaction (see bindEvents()/refreshSelectionUi()) — only a new match (lobby) is
+ * reachable from there.
  *
  * @module     mod_playercards/board
  * @copyright  2026 Jean Lúcio
@@ -70,6 +72,9 @@ const STRING_REQUESTS = [
     {key: 'effectapplied', component: 'mod_playercards'},
     {key: 'wrongansweractivated', component: 'mod_playercards'},
     {key: 'classpromotion', component: 'mod_playercards'},
+    {key: 'endturnbtn', component: 'mod_playercards'},
+    {key: 'resultwin', component: 'mod_playercards'},
+    {key: 'resultloss', component: 'mod_playercards'},
     {key: 'cancel', component: 'core'},
     {key: 'error', component: 'core'},
 ];
@@ -229,9 +234,11 @@ const buildMulliganContext = (state) => ({
  * @param {string} turnlabel Already-resolved "Turn N" string.
  * @param {string} promotionlabel Already-resolved "Class Promotion available (+N)" string,
  *  empty when none is pending.
+ * @param {string} matchendedlabel Already-resolved "Match ended: Win/Loss" string, empty
+ *  while the match is still ongoing.
  * @returns {object}
  */
-const buildMainContext = (state, turnlabel, promotionlabel) => ({
+const buildMainContext = (state, turnlabel, promotionlabel, matchendedlabel) => ({
     showlobby: false,
     showmulligan: false,
     showmain: true,
@@ -252,6 +259,10 @@ const buildMainContext = (state, turnlabel, promotionlabel) => ({
     humanloreslots: hydrateLoreZone(state.humanlore),
     haspendingpromotion: state.haspendingpromotion,
     promotionlabel,
+    finished: state.finished,
+    matchendedlabel,
+    showendturnbtn: !state.finished && state.activeplayer === 'human',
+    endturnbtnlabel: strings.endturnbtn,
 });
 
 /**
@@ -399,7 +410,7 @@ const refreshAttackerUi = (actionbar) => {
  * @returns {void}
  */
 const refreshSelectionUi = () => {
-    if (currentPanel !== 'main' || !rootEl) {
+    if (currentPanel !== 'main' || !rootEl || currentState.finished) {
         return;
     }
 
@@ -562,7 +573,12 @@ const bindEvents = () => {
         redrawbtn.addEventListener('click', () => onMulligan(false));
     }
 
-    if (currentPanel !== 'main') {
+    const endturnbtn = rootEl.querySelector('#playercards-endturn-btn');
+    if (endturnbtn) {
+        endturnbtn.addEventListener('click', onEndTurn);
+    }
+
+    if (currentPanel !== 'main' || currentState.finished) {
         return;
     }
 
@@ -634,7 +650,14 @@ const showState = async(state) => {
     const promotionlabel = state.haspendingpromotion
         ? await getString('promotionavailable', 'mod_playercards', state.pendingpromotionbonus)
         : '';
-    await render(buildMainContext(state, turnlabel, promotionlabel));
+    const matchendedlabel = state.finished
+        ? await getString(
+            'matchendedlabel',
+            'mod_playercards',
+            state.result === 'win' ? strings.resultwin : strings.resultloss
+        )
+        : '';
+    await render(buildMainContext(state, turnlabel, promotionlabel, matchendedlabel));
 };
 
 /**
@@ -924,6 +947,21 @@ const onChangePosture = async() => {
             token: currentToken,
             fieldslot: selectedAttackerSlot,
         });
+        await showState(state);
+    } catch (error) {
+        Notification.alert(strings.error, error.message);
+    }
+};
+
+/**
+ * Ends the current turn: closes the human's Fase Final and plays the AI's whole turn in
+ * one round-trip (match_service::end_turn()).
+ *
+ * @returns {Promise<void>}
+ */
+const onEndTurn = async() => {
+    try {
+        const state = await callWs('mod_playercards_end_turn', {cmid, token: currentToken});
         await showState(state);
     } catch (error) {
         Notification.alert(strings.error, error.message);

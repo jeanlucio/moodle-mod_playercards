@@ -45,6 +45,12 @@ use cache_store;
  * for the human to answer only becomes reachable once the AI can activate Lore on its own
  * turn, which needs the AI play logic a later etapa builds.
  *
+ * Etapa 4 adds end_turn(): a single call processes the human's Fase Final, the AI's
+ * entire turn (draw, a minimal muster/attack via ai_player — see its own docblock for why
+ * this is deliberately simple), and the human's own next draw, since the client has no UI
+ * to drive the AI's turn step by step. A match ends (state['finished']) on a life-point
+ * knockout, a deck-out, or SCOPE.md 4.9's optional turn limit — see finish_match().
+ *
  * V1 does not enforce the Principal/Combate phase split from SCOPE.md 4.1 as two
  * distinct states: muster_guardian(), change_posture() and declare_attack() are all
  * available throughout the single 'main' phase, in any order, each already gated by its
@@ -55,6 +61,9 @@ use cache_store;
 class match_service {
     /** @var int Cards drawn into each player's opening hand. */
     private const HAND_SIZE = 5;
+
+    /** @var int Maximum hand size enforced at the end of each turn (SCOPE.md 4.9). */
+    private const MAX_HAND_SIZE = 6;
 
     /** @var int Starting life points per player (SCOPE.md 4.8, fixed in V1). */
     private const LIFE_POINTS = 10000;
@@ -167,11 +176,14 @@ class match_service {
         $state = [
             'hasmatch' => true,
             'token' => \core\uuid::generate(),
+            'deckid' => (int) $deck->id,
             'difficulty' => $difficulty,
             'phase' => 'mulligan',
             'firstplayer' => $firstplayer,
             'activeplayer' => $firstplayer,
             'turnnumber' => 0,
+            'finished' => false,
+            'result' => '',
             'lifepoints' => ['human' => self::LIFE_POINTS, 'ai' => self::LIFE_POINTS],
             'humandeck' => $humandeck,
             'aideck' => $aideck,
@@ -281,6 +293,8 @@ class match_service {
             'firstplayer' => $state['firstplayer'],
             'activeplayer' => $state['activeplayer'],
             'turnnumber' => $state['turnnumber'],
+            'finished' => (bool) ($state['finished'] ?? false),
+            'result' => $state['result'] ?? '',
             'musterusedthisturn' => (bool) ($state['musterusedthisturn'] ?? false),
             'postureusedthisturn' => (bool) ($state['postureusedthisturn'] ?? false),
             'haspendingpromotion' => isset($state['pendingpromotion']),
@@ -775,6 +789,176 @@ class match_service {
     }
 
     /**
+     * Ends the human's turn: closes their Fase Final (hand limit), then plays the AI's
+     * entire turn (draw, ai_player::play_turn()) and opens the human's next turn (hand
+     * limit for the AI, draw for the human) — all in one call, since the client has no
+     * UI to drive the AI's turn step by step (SCOPE.md 7, "turno da IA processado").
+     *
+     * Checks for a match-ending condition after every life-point-changing or deck-
+     * emptying step: a Guardian's own attack during the AI's turn, the AI's own deck-out,
+     * the configured turn limit (SCOPE.md 4.9), and the human's own deck-out. Whichever
+     * triggers first ends the match immediately — later steps never run.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param \stdClass $instance Activity instance (for maxturns and finish_match()).
+     * @param string $token Match token.
+     * @return array Updated match state.
+     */
+    public static function end_turn(int $cmid, int $userid, \stdClass $instance, string $token): array {
+        $state = self::load_state($cmid, $userid);
+        self::validate_token($state, $token);
+        self::require_active_main_phase($state);
+
+        $state = self::trim_hand($state, 'humanhand');
+
+        $state['turnnumber']++;
+        $state['activeplayer'] = 'ai';
+        $state = self::reset_turn_start($state, 'ai');
+
+        $maxturns = (int) $instance->maxturns;
+        if ($maxturns > 0 && $state['turnnumber'] > $maxturns) {
+            return self::finish_match($cmid, $userid, $instance, $state, self::result_by_lifepoints($state));
+        }
+        if (count($state['aideck']) === 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'win');
+        }
+        $state['aihand'][] = array_shift($state['aideck']);
+
+        $state = ai_player::play_turn($state);
+        if ($state['lifepoints']['ai'] <= 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'win');
+        }
+        if ($state['lifepoints']['human'] <= 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'loss');
+        }
+
+        $state = self::trim_hand($state, 'aihand');
+
+        $state['turnnumber']++;
+        $state['activeplayer'] = 'human';
+        $state = self::reset_turn_start($state, 'human');
+
+        if ($maxturns > 0 && $state['turnnumber'] > $maxturns) {
+            return self::finish_match($cmid, $userid, $instance, $state, self::result_by_lifepoints($state));
+        }
+        if (count($state['humandeck']) === 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'loss');
+        }
+        $state['humanhand'][] = array_shift($state['humandeck']);
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
+     * Resolves a turn-limit tie by remaining life points (SCOPE.md 4.9). The schema only
+     * has 'win'/'loss' for {playercards_attempts}.result — an exact tie (no real winner)
+     * is recorded as a loss, since it does not represent a genuine win worth completion
+     * credit either way; a V1 simplification, not a hard ruling.
+     *
+     * @param array $state Current state.
+     * @return string 'win' or 'loss'.
+     */
+    private static function result_by_lifepoints(array $state): string {
+        return $state['lifepoints']['human'] > $state['lifepoints']['ai'] ? 'win' : 'loss';
+    }
+
+    /**
+     * Resets whichever side's turn is starting: clears summoning sickness and the
+     * once-per-turn attack flag on every one of their own Guardians in play (SCOPE.md
+     * 4.2), and — only for the human, since the AI's whole turn resolves within a single
+     * end_turn() call with no need to persist its own per-turn flags — the muster/
+     * posture once-per-turn flags.
+     *
+     * @param array $state Current state.
+     * @param string $side 'human' or 'ai'.
+     * @return array Updated state.
+     */
+    private static function reset_turn_start(array $state, string $side): array {
+        $fieldkey = $side . 'field';
+        foreach ($state[$fieldkey] as $index => $slot) {
+            if ($slot !== null) {
+                $state[$fieldkey][$index]['sick'] = false;
+                $state[$fieldkey][$index]['attackedthisturn'] = false;
+            }
+        }
+
+        if ($side === 'human') {
+            $state['musterusedthisturn'] = false;
+            $state['postureusedthisturn'] = false;
+        }
+
+        return $state;
+    }
+
+    /**
+     * Trims a hand down to the maximum allowed size at the end of a turn (SCOPE.md 4.9).
+     * Discards from the end of the hand array — V1 has no "choose what to discard" UI/WS
+     * yet, so this is an automatic, deterministic simplification.
+     *
+     * @param array $state Current state.
+     * @param string $handkey 'humanhand' or 'aihand'.
+     * @return array Updated state.
+     */
+    private static function trim_hand(array $state, string $handkey): array {
+        $state[$handkey] = array_slice($state[$handkey], 0, self::MAX_HAND_SIZE);
+        return $state;
+    }
+
+    /**
+     * Ends the match: records the {playercards_attempts} row, updates the gradebook and
+     * recomputes completion — mirroring mod_playercross\local\round_service::
+     * finish_round()'s equivalent block.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param \stdClass $instance Activity instance.
+     * @param array $state Current state.
+     * @param string $result 'win' or 'loss'.
+     * @return array Updated (finished) match state.
+     */
+    private static function finish_match(
+        int $cmid,
+        int $userid,
+        \stdClass $instance,
+        array $state,
+        string $result
+    ): array {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/mod/playercards/lib.php');
+
+        $state['finished'] = true;
+        $state['result'] = $result;
+
+        $DB->insert_record('playercards_attempts', (object) [
+            'playercardsid' => $instance->id,
+            'userid' => $userid,
+            'deckid' => (int) $state['deckid'],
+            'aidifficulty' => $state['difficulty'],
+            'result' => $result,
+            'lpremaining' => max(0, (int) $state['lifepoints']['human']),
+            'turnsplayed' => (int) $state['turnnumber'],
+            'score' => $result === 'win' ? 100.0 : 0.0,
+            'timecreated' => time(),
+        ]);
+
+        playercards_update_grades($instance, $userid);
+
+        $cm = get_coursemodule_from_id('playercards', $cmid, 0, false, MUST_EXIST);
+        $course = get_course($instance->course);
+        $completioninfo = new \completion_info($course);
+        if ($completioninfo->is_enabled($cm)) {
+            $completioninfo->update_state($cm, COMPLETION_COMPLETE, $userid);
+        }
+
+        self::save_state($cmid, $userid, $state);
+
+        return $state;
+    }
+
+    /**
      * Guards a mutating call to a Guardian action against the wrong turn/phase — every
      * one of muster_guardian()/change_posture()/declare_attack() needs exactly this
      * check.
@@ -783,6 +967,9 @@ class match_service {
      * @return void
      */
     private static function require_active_main_phase(array $state): void {
+        if (!empty($state['finished'])) {
+            throw new \moodle_exception('error_matchfinished', 'mod_playercards');
+        }
         if ($state['phase'] !== 'main' || $state['activeplayer'] !== 'human') {
             throw new \moodle_exception('error_notyourturn', 'mod_playercards');
         }
@@ -797,6 +984,9 @@ class match_service {
      * @return void
      */
     private static function require_match_started(array $state): void {
+        if (!empty($state['finished'])) {
+            throw new \moodle_exception('error_matchfinished', 'mod_playercards');
+        }
         if ($state['phase'] !== 'main') {
             throw new \moodle_exception('error_notyourturn', 'mod_playercards');
         }

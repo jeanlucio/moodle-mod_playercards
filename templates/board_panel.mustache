@@ -18,15 +18,17 @@
     @template mod_playercards/board_panel
 
     Renders the PlayerCards board in one of three states: no match in progress (lobby),
-    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapas 1-3). Every
+    mulligan decision pending, or the main board (SCOPE.md 16, Fase 3 Etapas 1-4). Every
     boolean/list here is pre-computed client-side by amd/src/board.js from the raw Web
     service responses (start_match/mulligan/get_state/muster_guardian/change_posture/
-    declare_attack/set_lore/activate_lore/activate_quiz/class_promotion) — this template
-    stays logic-less. The contextual action bar (posture choice during a muster,
+    declare_attack/set_lore/activate_lore/activate_quiz/class_promotion/end_turn) — this
+    template stays logic-less. The contextual action bar (posture choice during a muster,
     attack/change-posture/cancel buttons for a selected Guardian, the Class Promotion
     sacrifice/target/stat picker) is built entirely in JS into #playercards-actionbar, not
     templated here. Own Lore slots always reveal their name/subtype/facedown=false (a
     player always knows what they placed); the opponent's stay facedown until removed.
+    The end-turn button only shows on the human's own turn while the match is ongoing;
+    once finished is true, a result banner replaces it and no further interaction binds.
 
     Example context (json):
     {
@@ -76,7 +78,11 @@
             {"index": 1, "occupied": true, "facedown": false, "name": "Fragmento de Sabedoria", "subtypelabel": "Info"}
         ],
         "haspendingpromotion": true,
-        "promotionlabel": "Class Promotion available (+400)"
+        "promotionlabel": "Class Promotion available (+400)",
+        "finished": false,
+        "matchendedlabel": "",
+        "showendturnbtn": true,
+        "endturnbtnlabel": "End turn"
     }
 }}
 {{#showlobby}}
@@ -128,6 +134,17 @@
             <span class="playercards-lp playercards-lp-ai">{{#str}} lifepoints, mod_playercards {{/str}}: {{ailp}}</span>
             <span class="playercards-lp playercards-lp-human">{{#str}} lifepoints, mod_playercards {{/str}}: {{humanlp}}</span>
         </div>
+
+        {{#finished}}
+            <div class="playercards-matchended-banner alert alert-info" role="status">
+                {{matchendedlabel}}
+            </div>
+        {{/finished}}
+        {{#showendturnbtn}}
+            <button type="button" class="btn btn-secondary" id="playercards-endturn-btn">
+                {{endturnbtnlabel}}
+            </button>
+        {{/showendturnbtn}}
 
         <div class="playercards-zone playercards-zone-ai">
             <div class="playercards-zone-label">{{#str}} opponenthand, mod_playercards {{/str}} ({{aihandcount}})</div>

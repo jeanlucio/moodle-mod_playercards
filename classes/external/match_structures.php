@@ -113,6 +113,8 @@ class match_structures {
             'firstplayer' => new external_value(PARAM_ALPHA, 'human | ai', VALUE_DEFAULT, ''),
             'activeplayer' => new external_value(PARAM_ALPHA, 'human | ai', VALUE_DEFAULT, ''),
             'turnnumber' => new external_value(PARAM_INT, 'Current turn number, 0 during mulligan', VALUE_DEFAULT, 0),
+            'finished' => new external_value(PARAM_BOOL, 'Whether the match has ended', VALUE_DEFAULT, false),
+            'result' => new external_value(PARAM_ALPHA, 'win | loss, empty while the match is ongoing', VALUE_DEFAULT, ''),
             'musterusedthisturn' => new external_value(
                 PARAM_BOOL,
                 'Whether the active player already mustered a Guardian this turn',
