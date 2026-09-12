@@ -577,7 +577,7 @@ final class match_service_test extends \advanced_testcase {
         $state['aifield'][0] = $this->field_entry('defender', $guardianids[0], 'attack', false);
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::declare_attack($cmid, $userid, $state['token'], 0, 0);
+        $result = match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, 0);
 
         $this->assertNull($result['aifield'][0]);
         $this->assertNotNull($result['humanfield'][0]);
@@ -606,7 +606,7 @@ final class match_service_test extends \advanced_testcase {
         $state['humanfield'][0] = $this->field_entry('attacker', $guardianids[0], 'attack', false);
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
+        $result = match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, null);
 
         $this->assertSame(10000 - 400, $result['lifepoints']['ai']);
     }
@@ -633,7 +633,7 @@ final class match_service_test extends \advanced_testcase {
         $this->inject_state($cmid, $userid, $state);
 
         $this->expectException(\moodle_exception::class);
-        match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
+        match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, null);
     }
 
     /**
@@ -658,13 +658,88 @@ final class match_service_test extends \advanced_testcase {
         $state['humanfield'][0] = $this->field_entry('freshlysummoned', $guardianids[0], 'attack', true);
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
+        $result = match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, null);
 
         $this->assertTrue($result['humanfield'][0]['attackedthisturn']);
         $this->assertSame(10000 - 400, $result['lifepoints']['ai']);
 
         $this->expectException(\moodle_exception::class);
-        match_service::declare_attack($cmid, $userid, $result['token'], 0, null);
+        match_service::declare_attack($cmid, $userid, $instance, $result['token'], 0, null);
+    }
+
+    /**
+     * declare_attack() ends the match immediately when it knocks the AI's life points to
+     * 0 or below — this check was missing entirely until v1.17 (the only knockout check
+     * that existed lived inside end_turn()'s AI-turn processing), so a human attack that
+     * finished the AI off mid-turn used to leave the match running indefinitely instead
+     * of declaring a win (a real bug found live: life points went to -1800 with no
+     * result ever recorded).
+     *
+     * @return void
+     */
+    public function test_declare_attack_finishes_match_on_ai_knockout(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['lifepoints']['ai'] = 300;
+        $state['humanfield'][0] = $this->field_entry('attacker', $guardianids[0], 'attack', false);
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, null);
+
+        $this->assertTrue($result['finished']);
+        $this->assertSame('win', $result['result']);
+        $this->assertLessThanOrEqual(0, $result['lifepoints']['ai']);
+
+        $attempt = $DB->get_record('playercards_attempts', ['playercardsid' => $instance->id, 'userid' => $userid]);
+        $this->assertNotFalse($attempt);
+        $this->assertSame('win', $attempt->result);
+    }
+
+    /**
+     * declare_attack() also ends the match on a human knockout — reachable when the
+     * attacker loses combat and its own controller takes the ATK-difference recoil
+     * damage (SCOPE.md 4.5). Same missing-check bug as the AI-knockout case above.
+     *
+     * @return void
+     */
+    public function test_declare_attack_finishes_match_on_human_knockout(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        // Guardian index 0 is level 1 (atk 400); index 11 is level 4 (atk 1600) — a weak
+        // attacker losing to a strong defender, recoiling the ATK difference (1200) onto
+        // the human.
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['lifepoints']['human'] = 1000;
+        $state['humanfield'][0] = $this->field_entry('weakattacker', $guardianids[0], 'attack', false);
+        $state['aifield'][0] = $this->field_entry('strongdefender', $guardianids[11], 'attack', false);
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, 0);
+
+        $this->assertTrue($result['finished']);
+        $this->assertSame('loss', $result['result']);
+        $this->assertLessThanOrEqual(0, $result['lifepoints']['human']);
+
+        $attempt = $DB->get_record('playercards_attempts', ['playercardsid' => $instance->id, 'userid' => $userid]);
+        $this->assertNotFalse($attempt);
+        $this->assertSame('loss', $attempt->result);
     }
 
     /**
@@ -696,7 +771,7 @@ final class match_service_test extends \advanced_testcase {
         $this->inject_state($cmid, $userid, $state);
 
         try {
-            match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
+            match_service::declare_attack($cmid, $userid, $instance, $state['token'], 0, null);
             $this->fail('Expected a moodle_exception for turn 1 having no Battle Phase.');
         } catch (\moodle_exception $e) {
             $this->assertSame('error_nobattlephaseturn1', $e->errorcode);
@@ -803,7 +878,7 @@ final class match_service_test extends \advanced_testcase {
         $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::activate_lore($cmid, $userid, $state['token'], 1, 0);
+        $result = match_service::activate_lore($cmid, $userid, $instance, $state['token'], 1, 0);
 
         $this->assertSame('Revealed fact.', $result['revealedcontent']);
         $this->assertSame(300, $result['state']['humanfield'][0]['atkbonus']);
@@ -830,10 +905,44 @@ final class match_service_test extends \advanced_testcase {
         $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::activate_lore($cmid, $userid, $state['token'], 1, null);
+        $result = match_service::activate_lore($cmid, $userid, $instance, $state['token'], 1, null);
 
         $this->assertSame('', $result['revealedcontent']);
         $this->assertSame(9600, $result['state']['lifepoints']['ai']);
+    }
+
+    /**
+     * activate_lore() ends the match immediately when a Trap card's lp_damage effect
+     * knocks the AI's life points to 0 or below — same missing-check bug as
+     * declare_attack()'s knockout tests above, fixed alongside it in v1.17.
+     *
+     * @return void
+     */
+    public function test_activate_lore_finishes_match_on_knockout(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = (int) $instance->cmid;
+        $userid = (int) $student->id;
+
+        $loreid = $this->insert_lore_card((int) $instance->id, 'trap', 'lp_damage', 400);
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['lifepoints']['ai'] = 300;
+        $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::activate_lore($cmid, $userid, $instance, $state['token'], 1, null);
+
+        $this->assertTrue($result['state']['finished']);
+        $this->assertSame('win', $result['state']['result']);
+
+        $attempt = $DB->get_record('playercards_attempts', ['playercardsid' => $instance->id, 'userid' => $userid]);
+        $this->assertNotFalse($attempt);
+        $this->assertSame('win', $attempt->result);
     }
 
     /**
@@ -857,7 +966,7 @@ final class match_service_test extends \advanced_testcase {
         $this->inject_state($cmid, $userid, $state);
 
         $this->expectException(\moodle_exception::class);
-        match_service::activate_lore($cmid, $userid, $state['token'], 1, null);
+        match_service::activate_lore($cmid, $userid, $instance, $state['token'], 1, null);
     }
 
     /**
@@ -903,7 +1012,7 @@ final class match_service_test extends \advanced_testcase {
         $state['humanlore'][1] = ['uid' => 'lorecard', 'cardtype' => 'lore', 'cardid' => $loreid, 'facedown' => true];
         $this->inject_state($cmid, $userid, $state);
 
-        $result = match_service::activate_quiz($cmid, $userid, $state['token'], 1, null);
+        $result = match_service::activate_quiz($cmid, $userid, $instance, $state['token'], 1, null);
 
         $this->assertTrue($result['aicorrect']);
         $this->assertSame(500, $result['lpchange']);

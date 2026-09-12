@@ -463,6 +463,8 @@ class match_service {
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
+     * @param \stdClass $instance Activity instance (only needed to finish the match if
+     *  this attack knocks either side's life points to 0 or below).
      * @param string $token Match token.
      * @param int $attackerslot Own field slot declaring the attack.
      * @param int|null $targetslot Opposing field slot to attack, or null for a direct
@@ -472,6 +474,7 @@ class match_service {
     public static function declare_attack(
         int $cmid,
         int $userid,
+        \stdClass $instance,
         string $token,
         int $attackerslot,
         ?int $targetslot
@@ -546,6 +549,11 @@ class match_service {
             $state['humanfield'][$attackerslot]['attackedthisturn'] = true;
         }
 
+        $finished = self::check_lifepoint_knockout($cmid, $userid, $instance, $state);
+        if ($finished !== null) {
+            return $finished;
+        }
+
         self::save_state($cmid, $userid, $state);
 
         return $state;
@@ -601,6 +609,8 @@ class match_service {
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
+     * @param \stdClass $instance Activity instance (only needed to finish the match if
+     *  this Lore card's effect knocks either side's life points to 0 or below).
      * @param string $token Match token.
      * @param int $loreslot Own Lore slot to activate.
      * @param int|null $targetslot Field slot the effect targets, required only for
@@ -610,6 +620,7 @@ class match_service {
     public static function activate_lore(
         int $cmid,
         int $userid,
+        \stdClass $instance,
         string $token,
         int $loreslot,
         ?int $targetslot
@@ -638,6 +649,11 @@ class match_service {
         );
         $state['humanlore'][$loreslot] = null;
 
+        $finished = self::check_lifepoint_knockout($cmid, $userid, $instance, $state);
+        if ($finished !== null) {
+            return ['state' => $finished, 'revealedcontent' => $revealedcontent];
+        }
+
         self::save_state($cmid, $userid, $state);
 
         return ['state' => $state, 'revealedcontent' => $revealedcontent];
@@ -653,6 +669,8 @@ class match_service {
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
+     * @param \stdClass $instance Activity instance (only needed to finish the match if
+     *  this Quiz card's outcome knocks either side's life points to 0 or below).
      * @param string $token Match token.
      * @param int $loreslot Own Lore slot to activate.
      * @param int|null $targetslot Field slot the effect targets if the AI answers wrong,
@@ -663,6 +681,7 @@ class match_service {
     public static function activate_quiz(
         int $cmid,
         int $userid,
+        \stdClass $instance,
         string $token,
         int $loreslot,
         ?int $targetslot
@@ -699,6 +718,18 @@ class match_service {
             );
         }
         $state['humanlore'][$loreslot] = null;
+
+        $finished = self::check_lifepoint_knockout($cmid, $userid, $instance, $state);
+        if ($finished !== null) {
+            return [
+                'state' => $finished,
+                'questiontext' => $question['questiontext'],
+                'options' => $question['options'],
+                'correctindex' => $question['correctindex'],
+                'aicorrect' => $aicorrect,
+                'lpchange' => $lpchange,
+            ];
+        }
 
         self::save_state($cmid, $userid, $state);
 
@@ -889,11 +920,9 @@ class match_service {
         }
 
         $state = ai_player::play_turn($state);
-        if ($state['lifepoints']['ai'] <= 0) {
-            return self::finish_match($cmid, $userid, $instance, $state, 'win');
-        }
-        if ($state['lifepoints']['human'] <= 0) {
-            return self::finish_match($cmid, $userid, $instance, $state, 'loss');
+        $finished = self::check_lifepoint_knockout($cmid, $userid, $instance, $state);
+        if ($finished !== null) {
+            return $finished;
         }
 
         $state = self::trim_hand($state, 'aihand');
@@ -926,6 +955,33 @@ class match_service {
      */
     private static function result_by_lifepoints(array $state): string {
         return $state['lifepoints']['human'] > $state['lifepoints']['ai'] ? 'win' : 'loss';
+    }
+
+    /**
+     * Ends the match immediately if this action just knocked either side's life points
+     * to 0 or below (SCOPE.md 4.5: victory is reducing the opponent's life points to 0).
+     * end_turn()/mulligan() already check this after the AI's own attack step via
+     * run_ai_turn_then_open_human() — this is the equivalent check for every other
+     * action that can change life points outside that flow: the human's own
+     * declare_attack(), and a Lore card's lp_damage/lp_heal effect (activate_lore(),
+     * activate_quiz()). Without it here, a match could carry on indefinitely past a
+     * losing side's life points going negative.
+     *
+     * @param int $cmid Course module id.
+     * @param int $userid User id.
+     * @param \stdClass $instance Activity instance.
+     * @param array $state Current state, after the life-point change has been applied.
+     * @return array|null The finished match state if this action ended the match, or
+     *  null if the match is still ongoing.
+     */
+    private static function check_lifepoint_knockout(int $cmid, int $userid, \stdClass $instance, array $state): ?array {
+        if ($state['lifepoints']['ai'] <= 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'win');
+        }
+        if ($state['lifepoints']['human'] <= 0) {
+            return self::finish_match($cmid, $userid, $instance, $state, 'loss');
+        }
+        return null;
     }
 
     /**

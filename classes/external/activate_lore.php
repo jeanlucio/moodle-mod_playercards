@@ -65,7 +65,7 @@ class activate_lore extends external_api {
      * @return array Match state plus the revealed content.
      */
     public static function execute(int $cmid, string $token, int $loreslot, int $targetslot = -1): array {
-        global $USER;
+        global $DB, $USER;
 
         $params = self::validate_parameters(self::execute_parameters(), [
             'cmid' => $cmid,
@@ -79,11 +79,13 @@ class activate_lore extends external_api {
         self::validate_context($context);
         require_capability('mod/playercards:view', $context);
 
+        $instance = $DB->get_record('playercards', ['id' => $cm->instance], '*', MUST_EXIST);
         $target = $params['targetslot'] >= 0 ? $params['targetslot'] : null;
 
         $result = match_service::activate_lore(
             $params['cmid'],
             (int) $USER->id,
+            $instance,
             $params['token'],
             $params['loreslot'],
             $target

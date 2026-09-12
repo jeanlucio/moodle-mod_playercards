@@ -66,7 +66,7 @@ class declare_attack extends external_api {
      * @return array Match state.
      */
     public static function execute(int $cmid, string $token, int $attackerslot, int $targetslot = -1): array {
-        global $USER;
+        global $DB, $USER;
 
         $params = self::validate_parameters(self::execute_parameters(), [
             'cmid' => $cmid,
@@ -80,11 +80,13 @@ class declare_attack extends external_api {
         self::validate_context($context);
         require_capability('mod/playercards:view', $context);
 
+        $instance = $DB->get_record('playercards', ['id' => $cm->instance], '*', MUST_EXIST);
         $target = $params['targetslot'] >= 0 ? $params['targetslot'] : null;
 
         $state = match_service::declare_attack(
             $params['cmid'],
             (int) $USER->id,
+            $instance,
             $params['token'],
             $params['attackerslot'],
             $target
