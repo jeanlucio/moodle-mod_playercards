@@ -97,6 +97,35 @@ class match_structures {
     }
 
     /**
+     * Structure of one event from the AI's just-played turn (ai_player::play_turn()'s
+     * state['aiturnevents']) — a single unified shape covering all three event types
+     * (muster, direct attack, attack against a Guardian), with whichever fields don't
+     * apply to a given type left at their default (matching card_structure()/
+     * slot_structure()'s own pattern for the same reason).
+     *
+     * @return external_single_structure
+     */
+    public static function ai_turn_event_structure(): external_single_structure {
+        return new external_single_structure([
+            'type' => new external_value(PARAM_ALPHA, 'muster | attackdirect | attackcombat'),
+            'cardname' => new external_value(PARAM_TEXT, 'Mustered card, or the attacking Guardian\'s name'),
+            'targetname' => new external_value(
+                PARAM_TEXT,
+                'Defending Guardian\'s name, empty for muster/attackdirect',
+                VALUE_DEFAULT,
+                ''
+            ),
+            'damage' => new external_value(PARAM_INT, 'Life point damage this event dealt to the human', VALUE_DEFAULT, 0),
+            'defenderdestroyed' => new external_value(
+                PARAM_BOOL,
+                'Whether the target Guardian was destroyed, only meaningful for attackcombat',
+                VALUE_DEFAULT,
+                false
+            ),
+        ]);
+    }
+
+    /**
      * The full match-state field definitions, as a plain array — shared by
      * match_state_structure() and by any Web service (activate_lore, activate_quiz) that
      * needs to return the match state plus its own extra fields in a single
@@ -115,6 +144,13 @@ class match_structures {
             'turnnumber' => new external_value(PARAM_INT, 'Current turn number, 0 during mulligan', VALUE_DEFAULT, 0),
             'finished' => new external_value(PARAM_BOOL, 'Whether the match has ended', VALUE_DEFAULT, false),
             'result' => new external_value(PARAM_ALPHA, 'win | loss, empty while the match is ongoing', VALUE_DEFAULT, ''),
+            'aiturnevents' => new external_multiple_structure(
+                self::ai_turn_event_structure(),
+                'What the AI did on the turn this response is reporting on, if any — empty '
+                    . 'outside end_turn()/mulligan() responses that just processed one',
+                VALUE_DEFAULT,
+                []
+            ),
             'musterusedthisturn' => new external_value(
                 PARAM_BOOL,
                 'Whether the active player already mustered a Guardian this turn',

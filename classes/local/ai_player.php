@@ -26,12 +26,20 @@ namespace mod_playercards\local;
 
 /**
  * Plays one full AI turn: a single free (level 1-3) muster if possible, then an attack
- * with every eligible Guardian already in play. Deliberately simple for V1 — no
- * sacrificial muster, no Lore activation (the AI cannot activate Lore of its own yet,
- * see match_service's class docblock), no posture changes. Runs entirely within one
- * match_service::end_turn() call, since the human client has no UI to drive the AI's own
- * turn — there is nothing to persist mid-turn for the AI the way musterusedthisturn/
- * postureusedthisturn track the human's turn.
+ * with every eligible Guardian already in play whose attack would not backfire (see
+ * attack()'s own docblock). Deliberately simple for V1 — no sacrificial muster, no Lore
+ * activation (the AI cannot activate Lore of its own yet, see match_service's class
+ * docblock), no posture changes. Runs entirely within one match_service::end_turn()
+ * call, since the human client has no UI to drive the AI's own turn — there is nothing
+ * to persist mid-turn for the AI the way musterusedthisturn/postureusedthisturn track
+ * the human's turn.
+ *
+ * Every muster/attack this turn is recorded into state['aiturnevents'] (cleared at the
+ * start of every play_turn() call, and stripped by match_service::save_state() before
+ * persisting — it only ever describes the AI turn the current response is reporting on,
+ * never a stale one from before) so the client can show the human what just happened —
+ * otherwise the entire AI turn resolves silently server-side with no way to tell what
+ * the AI did (SCOPE.md 17).
  */
 class ai_player {
     /** @var int Maximum Guardian level the AI musters for free (SCOPE.md 4.2). */
@@ -45,9 +53,11 @@ class ai_player {
      * check correctly covers the AI going first just as much as the human.
      *
      * @param array $state Match state, with activeplayer already set to 'ai'.
-     * @return array Updated match state.
+     * @return array Updated match state, with a fresh state['aiturnevents'] describing
+     *  every muster/attack this call made.
      */
     public static function play_turn(array $state): array {
+        $state['aiturnevents'] = [];
         $state = self::muster($state);
         if ((int) $state['turnnumber'] !== 1) {
             $state = self::attack($state);
@@ -75,8 +85,8 @@ class ai_player {
                 continue;
             }
 
-            $level = (int) $DB->get_field('playercards_guardians', 'level', ['id' => $card['cardid']], MUST_EXIST);
-            if ($level > self::FREE_MUSTER_MAX_LEVEL) {
+            $guardian = $DB->get_record('playercards_guardians', ['id' => $card['cardid']], '*', MUST_EXIST);
+            if ((int) $guardian->level > self::FREE_MUSTER_MAX_LEVEL) {
                 continue;
             }
 
@@ -91,6 +101,13 @@ class ai_player {
                 'atkbonus' => 0,
                 'defbonus' => 0,
             ];
+            $state['aiturnevents'][] = [
+                'type' => 'muster',
+                'cardname' => $guardian->name,
+                'targetname' => '',
+                'damage' => 0,
+                'defenderdestroyed' => false,
+            ];
             break;
         }
 
@@ -103,6 +120,16 @@ class ai_player {
      * since real Yu-Gi-Oh has no restriction on attacking the turn a monster is
      * Summoned), against the first human Guardian in play, or directly if the human's
      * field is empty (SCOPE.md 4.5).
+     *
+     * A direct attack is always attempted (pure upside, no defender to lose against).
+     * Against a defender, the AI first works out the combat_engine result and skips the
+     * attack entirely — leaving the Guardian idle this turn — whenever it would destroy
+     * or damage the attacker itself (SCOPE.md 17): found live (a real match, not a test)
+     * repeatedly attacking a stronger defender for no gain and taking the ATK/DEF
+     * difference as self-inflicted damage every single time. This is still not real
+     * target selection — it only ever considers the one fixed target
+     * find_first_occupied() already picked — just a minimal check of whether attacking
+     * that target is worth it at all.
      *
      * @param array $state Match state.
      * @return array Updated match state.
@@ -124,7 +151,15 @@ class ai_player {
 
             $targetslot = self::find_first_occupied($state['humanfield']);
             if ($targetslot === null) {
-                $state['lifepoints']['human'] -= combat_engine::resolve_direct_attack($attackeratk);
+                $damage = combat_engine::resolve_direct_attack($attackeratk);
+                $state['lifepoints']['human'] -= $damage;
+                $state['aiturnevents'][] = [
+                    'type' => 'attackdirect',
+                    'cardname' => $attackercard->name,
+                    'targetname' => '',
+                    'damage' => $damage,
+                    'defenderdestroyed' => false,
+                ];
             } else {
                 $defender = $state['humanfield'][$targetslot];
                 $defendercard = $DB->get_record('playercards_guardians', ['id' => $defender['cardid']], '*', MUST_EXIST);
@@ -137,14 +172,21 @@ class ai_player {
                     $defender['posture'] === 'attack'
                 );
 
-                if ($result['attackerdestroyed']) {
-                    $state['aifield'][$slot] = null;
+                if ($result['attackerdestroyed'] || $result['attackerdamage'] > 0) {
+                    continue;
                 }
+
                 if ($result['defenderdestroyed']) {
                     $state['humanfield'][$targetslot] = null;
                 }
-                $state['lifepoints']['ai'] -= $result['attackerdamage'];
                 $state['lifepoints']['human'] -= $result['defenderdamage'];
+                $state['aiturnevents'][] = [
+                    'type' => 'attackcombat',
+                    'cardname' => $attackercard->name,
+                    'targetname' => $defendercard->name,
+                    'damage' => $result['defenderdamage'],
+                    'defenderdestroyed' => $result['defenderdestroyed'],
+                ];
             }
 
             if ($state['aifield'][$slot] !== null) {

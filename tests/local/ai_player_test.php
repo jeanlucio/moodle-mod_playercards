@@ -249,4 +249,95 @@ final class ai_player_test extends \advanced_testcase {
         $this->assertSame(10000, $result['lifepoints']['human']);
         $this->assertFalse($result['aifield'][0]['attackedthisturn']);
     }
+
+    /**
+     * The AI skips an attack entirely — leaving the Guardian idle, not marked as having
+     * attacked, with nothing mutated — whenever it would destroy or damage the attacker
+     * itself (SCOPE.md 17). Found live in a real match: the AI kept attacking into a
+     * stronger defender and taking the ATK/DEF difference as self-inflicted damage every
+     * single time, with no way for it to ever come out ahead.
+     *
+     * @return void
+     */
+    public function test_play_turn_skips_an_unfavorable_attack(): void {
+        $this->resetAfterTest(true);
+
+        $weakattackerid = $this->insert_guardian(1, 400);
+        $strongdefenderid = $this->insert_guardian(4, 1600);
+        $state = $this->base_state();
+        $state['aifield'][0] = [
+            'uid' => 'a1', 'cardtype' => 'guardian', 'cardid' => $weakattackerid,
+            'posture' => 'attack', 'sick' => false, 'attackedthisturn' => false,
+        ];
+        $state['humanfield'][0] = [
+            'uid' => 'h1', 'cardtype' => 'guardian', 'cardid' => $strongdefenderid,
+            'posture' => 'attack', 'sick' => false, 'attackedthisturn' => false,
+        ];
+
+        $result = ai_player::play_turn($state);
+
+        $this->assertNotNull($result['aifield'][0]);
+        $this->assertFalse($result['aifield'][0]['attackedthisturn']);
+        $this->assertNotNull($result['humanfield'][0]);
+        $this->assertSame(10000, $result['lifepoints']['ai']);
+        $this->assertSame(10000, $result['lifepoints']['human']);
+        $this->assertSame([], $result['aiturnevents']);
+    }
+
+    /**
+     * play_turn() records one event per muster/attack this turn in state['aiturnevents']
+     * — used by the client to show the human what the AI's turn actually did, since
+     * end_turn()/mulligan() otherwise resolve the AI's whole turn silently server-side
+     * with no way to tell what happened (SCOPE.md 17).
+     *
+     * @return void
+     */
+    public function test_play_turn_records_events_for_muster_and_direct_attack(): void {
+        $this->resetAfterTest(true);
+
+        $guardianid = $this->insert_guardian(2, 800);
+        $state = $this->base_state();
+        $state['aihand'][] = ['uid' => 'a1', 'cardtype' => 'guardian', 'cardid' => $guardianid];
+
+        $result = ai_player::play_turn($state);
+
+        $this->assertCount(2, $result['aiturnevents']);
+        $this->assertSame('muster', $result['aiturnevents'][0]['type']);
+        $this->assertSame('Guardian L2', $result['aiturnevents'][0]['cardname']);
+        $this->assertSame('attackdirect', $result['aiturnevents'][1]['type']);
+        $this->assertSame('Guardian L2', $result['aiturnevents'][1]['cardname']);
+        $this->assertSame(800, $result['aiturnevents'][1]['damage']);
+    }
+
+    /**
+     * A favorable combat attack (defender destroyed, attacker unharmed) records an
+     * 'attackcombat' event with both card names and the outcome.
+     *
+     * @return void
+     */
+    public function test_play_turn_records_event_for_a_favorable_combat_attack(): void {
+        $this->resetAfterTest(true);
+
+        $attackerid = $this->insert_guardian(4, 1600);
+        $defenderid = $this->insert_guardian(1, 400);
+        $state = $this->base_state();
+        $state['aifield'][0] = [
+            'uid' => 'a1', 'cardtype' => 'guardian', 'cardid' => $attackerid,
+            'posture' => 'attack', 'sick' => false, 'attackedthisturn' => false,
+        ];
+        $state['humanfield'][0] = [
+            'uid' => 'h1', 'cardtype' => 'guardian', 'cardid' => $defenderid,
+            'posture' => 'attack', 'sick' => false, 'attackedthisturn' => false,
+        ];
+
+        $result = ai_player::play_turn($state);
+
+        $this->assertCount(1, $result['aiturnevents']);
+        $event = $result['aiturnevents'][0];
+        $this->assertSame('attackcombat', $event['type']);
+        $this->assertSame('Guardian L4', $event['cardname']);
+        $this->assertSame('Guardian L1', $event['targetname']);
+        $this->assertSame(1200, $event['damage']);
+        $this->assertTrue($event['defenderdestroyed']);
+    }
 }

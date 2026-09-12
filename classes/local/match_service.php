@@ -116,7 +116,10 @@ class match_service {
     }
 
     /**
-     * Persists match state.
+     * Persists match state. Strips aiturnevents (ai_player::play_turn()'s log of what
+     * the AI just did) before persisting — it only ever describes the single AI turn the
+     * caller's own response is reporting on, never something that should resurface on a
+     * later, unrelated get_state()/action call once loaded back from the cache.
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
@@ -124,6 +127,7 @@ class match_service {
      * @return void
      */
     private static function save_state(int $cmid, int $userid, array $state): void {
+        unset($state['aiturnevents']);
         self::get_cache()->set(self::session_key($cmid, $userid), $state);
     }
 
@@ -310,6 +314,7 @@ class match_service {
             'turnnumber' => $state['turnnumber'],
             'finished' => (bool) ($state['finished'] ?? false),
             'result' => $state['result'] ?? '',
+            'aiturnevents' => $state['aiturnevents'] ?? [],
             'musterusedthisturn' => (bool) ($state['musterusedthisturn'] ?? false),
             'postureusedthisturn' => (bool) ($state['postureusedthisturn'] ?? false),
             'haspendingpromotion' => isset($state['pendingpromotion']),

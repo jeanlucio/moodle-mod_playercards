@@ -1184,6 +1184,40 @@ final class match_service_test extends \advanced_testcase {
         $this->assertCount($humandeckbefore - 1, $result['humandeck']);
         $this->assertFalse($result['musterusedthisturn']);
         $this->assertFalse($result['postureusedthisturn']);
+        // The AI turn events let the client show what the AI's turn did (SCOPE.md 17).
+        $this->assertCount(2, $result['aiturnevents']);
+        $this->assertSame('muster', $result['aiturnevents'][0]['type']);
+        $this->assertSame('attackdirect', $result['aiturnevents'][1]['type']);
+    }
+
+    /**
+     * end_turn()'s response carries the AI's turn log (aiturnevents), but it is stripped
+     * before being persisted (match_service::save_state()) — a later get_state() call
+     * (e.g. after a page reload) must not resurface it as if the AI had just acted again.
+     *
+     * @return void
+     */
+    public function test_end_turn_does_not_persist_ai_turn_events(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $state = $this->reach_main_phase($instance, $cmid, $userid);
+        $state['aihand'] = [['uid' => 'aig1', 'cardtype' => 'guardian', 'cardid' => $guardianids[0]]];
+        $state['aifield'] = array_fill(0, 5, null);
+        $state['humanfield'] = array_fill(0, 5, null);
+        $this->inject_state($cmid, $userid, $state);
+
+        $result = match_service::end_turn($cmid, $userid, $instance, $state['token']);
+        $this->assertNotEmpty($result['aiturnevents']);
+
+        $reloaded = match_service::export_state(match_service::get_state($cmid, $userid, null));
+        $this->assertSame([], $reloaded['aiturnevents']);
     }
 
     /**

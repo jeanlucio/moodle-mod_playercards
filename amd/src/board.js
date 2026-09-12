@@ -21,7 +21,11 @@
  * pending question for the human to answer only becomes reachable once the AI can
  * activate Lore on its own turn. Once state.finished is true, the board stops binding any
  * interaction (see bindEvents()/refreshSelectionUi()) — only a new match (lobby) is
- * reachable from there.
+ * reachable from there. Whenever a response just processed the AI's own turn
+ * (end_turn(), or mulligan() when the AI went first), showAiTurnLog() shows what it did
+ * — one event at a time, with a reading pause — before the updated board itself renders;
+ * otherwise the entire AI turn resolves silently in one round-trip with no way to tell
+ * what happened (SCOPE.md 17).
  *
  * @module     mod_playercards/board
  * @copyright  2026 Jean Lúcio
@@ -676,6 +680,73 @@ const showState = async(state) => {
 };
 
 /**
+ * Waits for the given number of milliseconds.
+ *
+ * @param {number} ms Milliseconds to wait.
+ * @returns {Promise<void>}
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** @var {number} How long each AI turn event stays on screen (showAiTurnLog()). */
+const AI_EVENT_DISPLAY_MS = 1800;
+
+/**
+ * Builds the human-readable message for one AI turn event (see
+ * match_structures::ai_turn_event_structure() server-side).
+ *
+ * @param {object} event One entry from state.aiturnevents.
+ * @returns {Promise<string>}
+ */
+const buildAiEventMessage = async(event) => {
+    if (event.type === 'muster') {
+        return getString('aieventmuster', 'mod_playercards', event.cardname);
+    }
+
+    if (event.type === 'attackdirect') {
+        return getString('aieventattackdirect', 'mod_playercards', {attacker: event.cardname, damage: event.damage});
+    }
+
+    let message = await getString('aieventattack', 'mod_playercards', {attacker: event.cardname, target: event.targetname});
+    if (event.defenderdestroyed) {
+        message += ' ' + await getString('aieventtargetdestroyed', 'mod_playercards');
+    }
+    if (event.damage > 0) {
+        message += ' ' + await getString('aieventdamagedealt', 'mod_playercards', event.damage);
+    }
+    return message;
+};
+
+/**
+ * Shows what the AI did on its own turn, one event at a time with a reading pause
+ * between each — otherwise the AI's entire turn resolves silently in a single round-trip
+ * (end_turn()/mulligan()) and the human has no way to tell what just happened (SCOPE.md
+ * 17). Rendered as a banner above the board itself, outside rootEl, so it survives the
+ * render() call that replaces rootEl's own contents once the log finishes and the real
+ * updated board is shown.
+ *
+ * @param {Array} events state.aiturnevents from the response that just processed the
+ *  AI's turn (end_turn(), or mulligan() when the AI went first).
+ * @returns {Promise<void>}
+ */
+const showAiTurnLog = async(events) => {
+    if (!events || events.length === 0) {
+        return;
+    }
+
+    const banner = document.createElement('div');
+    banner.className = 'alert alert-info playercards-ai-turn-log';
+    banner.setAttribute('role', 'status');
+    rootEl.parentNode.insertBefore(banner, rootEl);
+
+    for (const event of events) {
+        banner.textContent = await buildAiEventMessage(event);
+        await sleep(AI_EVENT_DISPLAY_MS);
+    }
+
+    banner.remove();
+};
+
+/**
  * Returns to the lobby after a finished match, so the student can start a new one.
  * Purely client-side: the finished match's own state is simply overwritten server-side
  * the next time start_match() is called, so there is nothing to clean up here first.
@@ -712,6 +783,7 @@ const onStartMatch = async() => {
 const onMulligan = async(keep) => {
     try {
         const state = await callWs('mod_playercards_mulligan', {cmid, token: currentToken, keep});
+        await showAiTurnLog(state.aiturnevents);
         await showState(state);
     } catch (error) {
         Notification.alert(strings.error, error.message);
@@ -991,6 +1063,7 @@ const onChangePosture = async() => {
 const onEndTurn = async() => {
     try {
         const state = await callWs('mod_playercards_end_turn', {cmid, token: currentToken});
+        await showAiTurnLog(state.aiturnevents);
         await showState(state);
     } catch (error) {
         Notification.alert(strings.error, error.message);
