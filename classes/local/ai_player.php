@@ -38,14 +38,20 @@ class ai_player {
     private const FREE_MUSTER_MAX_LEVEL = 3;
 
     /**
-     * Plays the AI's entire turn.
+     * Plays the AI's entire turn. Mustering is always allowed, but the attack step is
+     * skipped entirely when this is turn 1 — the player who goes first has no Battle
+     * Phase at all on their very first turn (SCOPE.md 4.9), a real Yu-Gi-Oh rule; since
+     * turnnumber can only ever be 1 during whichever side's own first turn, this single
+     * check correctly covers the AI going first just as much as the human.
      *
      * @param array $state Match state, with activeplayer already set to 'ai'.
      * @return array Updated match state.
      */
     public static function play_turn(array $state): array {
         $state = self::muster($state);
-        $state = self::attack($state);
+        if ((int) $state['turnnumber'] !== 1) {
+            $state = self::attack($state);
+        }
         return $state;
     }
 

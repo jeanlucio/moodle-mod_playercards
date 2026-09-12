@@ -379,8 +379,9 @@ const refreshAttackerUi = (actionbar) => {
     const aiHasGuardian = currentState.aifield.some((slot) => slot.occupied);
     // A Guardian can attack the same turn it was mustered (real Yu-Gi-Oh has no
     // "summoning sickness" restriction on attacking); only changing battle position is
-    // blocked that turn.
-    const canAttack = attacker.posture === 'attack' && !attacker.attackedthisturn;
+    // blocked that turn. The player who goes first has no Battle Phase at all on turn 1
+    // (SCOPE.md 4.9) — a separate rule, still enforced regardless of sickness.
+    const canAttack = attacker.posture === 'attack' && !attacker.attackedthisturn && currentState.turnnumber !== 1;
     const canChangePosture = !attacker.sick && !currentState.postureusedthisturn;
 
     if (canAttack && aiHasGuardian) {

@@ -456,7 +456,10 @@ class match_service {
      * is empty (SCOPE.md 4.5). A Guardian can attack at most once per turn — including
      * the turn it was mustered (real Yu-Gi-Oh has no "summoning sickness" restriction on
      * attacking, unlike Magic: The Gathering; only changing battle position is blocked
-     * the turn a Guardian arrives — see change_posture()).
+     * the turn a Guardian arrives — see change_posture()). The player who goes first has
+     * no Battle Phase at all on turn 1 (SCOPE.md 4.9), a separate real Yu-Gi-Oh rule from
+     * the one above — turnnumber === 1 can only ever be that player's own first turn,
+     * whichever side that happens to be.
      *
      * @param int $cmid Course module id.
      * @param int $userid User id.
@@ -478,6 +481,10 @@ class match_service {
         $state = self::load_state($cmid, $userid);
         self::validate_token($state, $token);
         self::require_active_main_phase($state);
+
+        if ((int) $state['turnnumber'] === 1) {
+            throw new \moodle_exception('error_nobattlephaseturn1', 'mod_playercards');
+        }
 
         $attacker = self::require_own_guardian_slot($state, $attackerslot);
         if ($attacker['posture'] !== 'attack') {

@@ -159,8 +159,9 @@ final class match_service_test extends \advanced_testcase {
     }
 
     /**
-     * Starts a match and resolves the mulligan (keeping the hand), reaching turn 1's
-     * main phase — the common starting point for every muster/posture/combat test.
+     * Starts a match and resolves the mulligan (keeping the hand), reaching an ordinary,
+     * unrestricted main phase — the common starting point for every muster/posture/
+     * combat/Lore test.
      *
      * start_match() decides the coin toss randomly, so firstplayer/activeplayer are
      * forced to 'human' here, *before* calling mulligan() — every caller of this helper
@@ -171,10 +172,15 @@ final class match_service_test extends \advanced_testcase {
      * docblock), overriding activeplayer only after the call would be too late — the
      * AI's turn would already have mutated life points/turnnumber/etc.
      *
+     * turnnumber is forced to 2 (past mulligan()'s own turn 1) for the same reason: the
+     * player who goes first has no Battle Phase at all on turn 1 (SCOPE.md 4.9), and this
+     * helper exists to test ordinary muster/posture/attack/Lore mechanics, not that
+     * specific edge case — see test_declare_attack_rejects_on_turn_1() for it.
+     *
      * @param \stdClass $instance Activity instance.
      * @param int $cmid Course module id.
      * @param int $userid User id.
-     * @return array Match state at the start of turn 1.
+     * @return array Match state at the start of an ordinary main phase.
      */
     private function reach_main_phase(\stdClass $instance, int $cmid, int $userid): array {
         $started = match_service::start_match($instance, $cmid, $userid, 'normal');
@@ -183,6 +189,7 @@ final class match_service_test extends \advanced_testcase {
         $this->inject_state($cmid, $userid, $started);
 
         $state = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
+        $state['turnnumber'] = 2;
         $this->inject_state($cmid, $userid, $state);
         return $state;
     }
@@ -661,6 +668,42 @@ final class match_service_test extends \advanced_testcase {
     }
 
     /**
+     * declare_attack() rejects any attack attempt during turn 1 — the player who goes
+     * first has no Battle Phase at all on their own very first turn (SCOPE.md 4.9), a
+     * real Yu-Gi-Oh rule distinct from summoning sickness (which does not exist). Uses a
+     * hand-rolled setup rather than reach_main_phase(), which deliberately forces
+     * turnnumber past 1 for every other muster/posture/combat/Lore test.
+     *
+     * @return void
+     */
+    public function test_declare_attack_rejects_on_turn_1(): void {
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $instance = $this->getDataGenerator()->create_module('playercards', ['course' => $course->id]);
+        $student = $this->getDataGenerator()->create_user();
+        $guardianids = $this->seed_playable_fixture($instance, (int) $student->id);
+        $cmid = 42;
+        $userid = (int) $student->id;
+
+        $started = match_service::start_match($instance, $cmid, $userid, 'normal');
+        $started['firstplayer'] = 'human';
+        $started['activeplayer'] = 'human';
+        $this->inject_state($cmid, $userid, $started);
+
+        $state = match_service::mulligan($cmid, $userid, $instance, $started['token'], true);
+        $state['humanfield'][0] = $this->field_entry('attacker', $guardianids[0], 'attack', false);
+        $this->inject_state($cmid, $userid, $state);
+
+        try {
+            match_service::declare_attack($cmid, $userid, $state['token'], 0, null);
+            $this->fail('Expected a moodle_exception for turn 1 having no Battle Phase.');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('error_nobattlephaseturn1', $e->errorcode);
+        }
+    }
+
+    /**
      * Inserts a Lore card row.
      *
      * @param int $playercardsid Instance id.
@@ -1020,7 +1063,7 @@ final class match_service_test extends \advanced_testcase {
 
         $this->assertFalse($result['finished']);
         $this->assertSame('human', $result['activeplayer']);
-        $this->assertSame(3, $result['turnnumber']);
+        $this->assertSame(4, $result['turnnumber']);
         // The AI musters its only Guardian, then immediately attacks directly with it
         // (humanfield is empty) — a Guardian can attack the same turn it is mustered,
         // real Yu-Gi-Oh has no summoning-sickness restriction on attacking.
@@ -1094,7 +1137,7 @@ final class match_service_test extends \advanced_testcase {
         $this->assertNotFalse($attempt);
         $this->assertSame('win', $attempt->result);
         $this->assertSame(100.0, (float) $attempt->score);
-        $this->assertSame(2, (int) $attempt->turnsplayed);
+        $this->assertSame(3, (int) $attempt->turnsplayed);
     }
 
     /**
@@ -1127,7 +1170,7 @@ final class match_service_test extends \advanced_testcase {
         $this->assertNotFalse($attempt);
         $this->assertSame('loss', $attempt->result);
         $this->assertSame(0.0, (float) $attempt->score);
-        $this->assertSame(3, (int) $attempt->turnsplayed);
+        $this->assertSame(4, (int) $attempt->turnsplayed);
     }
 
     /**

@@ -85,6 +85,7 @@ $string['error_needonecorrect'] = 'Exactly one answer option must be marked corr
 $string['error_needtwoanswers'] = 'Enter at least two answer options.';
 $string['error_needtwosacrifices'] = 'Class Promotion needs exactly 2 Guardians to sacrifice.';
 $string['error_noactivedeck'] = 'You need an active deck before starting a match.';
+$string['error_nobattlephaseturn1'] = 'The player who goes first has no Battle Phase on turn 1.';
 $string['error_nocontentavailable'] = 'This card has no approved content available yet.';
 $string['error_notmulliganphase'] = 'The mulligan decision is not available right now.';
 $string['error_notquizcard'] = 'That is not a Quiz card.';

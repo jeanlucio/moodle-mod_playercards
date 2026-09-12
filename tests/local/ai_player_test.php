@@ -59,11 +59,15 @@ final class ai_player_test extends \advanced_testcase {
 
     /**
      * Builds a bare match state with only the fields ai_player itself touches.
+     * turnnumber defaults to 2 (never the AI's own first turn) so every other test in
+     * this file can exercise the attack step freely — see
+     * test_play_turn_skips_the_attack_step_entirely_on_turn_1() for the turn-1 case.
      *
      * @return array
      */
     private function base_state(): array {
         return [
+            'turnnumber' => 2,
             'lifepoints' => ['human' => 10000, 'ai' => 10000],
             'aihand' => [],
             'aifield' => array_fill(0, 5, null),
@@ -219,5 +223,30 @@ final class ai_player_test extends \advanced_testcase {
 
         $this->assertSame(10000 - 400, $result['lifepoints']['human']);
         $this->assertTrue($result['aifield'][0]['attackedthisturn']);
+    }
+
+    /**
+     * The player who goes first has no Battle Phase at all on turn 1 (SCOPE.md 4.9) — a
+     * separate real Yu-Gi-Oh rule from summoning sickness (which does not exist). When
+     * the AI is the one going first, play_turn() still musters normally but skips the
+     * attack step entirely for that single turn.
+     *
+     * @return void
+     */
+    public function test_play_turn_skips_the_attack_step_entirely_on_turn_1(): void {
+        $this->resetAfterTest(true);
+
+        $guardianid = $this->insert_guardian(1, 400);
+        $state = $this->base_state();
+        $state['turnnumber'] = 1;
+        $state['aifield'][0] = [
+            'uid' => 'a1', 'cardtype' => 'guardian', 'cardid' => $guardianid,
+            'posture' => 'attack', 'sick' => false, 'attackedthisturn' => false,
+        ];
+
+        $result = ai_player::play_turn($state);
+
+        $this->assertSame(10000, $result['lifepoints']['human']);
+        $this->assertFalse($result['aifield'][0]['attackedthisturn']);
     }
 }

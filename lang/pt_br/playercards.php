@@ -85,6 +85,7 @@ $string['error_needonecorrect'] = 'Exatamente uma opção de resposta precisa es
 $string['error_needtwoanswers'] = 'Informe pelo menos duas opções de resposta.';
 $string['error_needtwosacrifices'] = 'A Promoção de Classe precisa de exatamente 2 Guardiões para sacrificar.';
 $string['error_noactivedeck'] = 'Você precisa de um deck ativo antes de iniciar uma partida.';
+$string['error_nobattlephaseturn1'] = 'Quem começa a partida não tem Fase de Batalha no turno 1.';
 $string['error_nocontentavailable'] = 'Esta carta ainda não tem conteúdo aprovado disponível.';
 $string['error_notmulliganphase'] = 'A decisão de mulligan não está disponível agora.';
 $string['error_notquizcard'] = 'Essa carta não é do tipo Quiz.';
