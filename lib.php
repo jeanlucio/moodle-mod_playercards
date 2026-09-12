@@ -390,3 +390,33 @@ function playercards_get_completion_active_rule_descriptions(stdClass|cm_info $c
 
     return $descriptions;
 }
+
+/**
+ * Adds links to the Lore/question management screen and the attempts report to the
+ * activity's settings navigation — otherwise neither page is reachable from anywhere in
+ * the plugin's own UI once installed.
+ *
+ * @param settings_navigation $settings Settings navigation instance.
+ * @param navigation_node $node Navigation node to add child nodes to.
+ * @return void
+ */
+function playercards_extend_settings_navigation(settings_navigation $settings, navigation_node $node): void {
+    $cm = $settings->get_page()->cm;
+    if ($cm === null) {
+        return;
+    }
+
+    if (has_capability('mod/playercards:managelore', $cm->context)) {
+        $node->add(
+            get_string('managelorenav', 'mod_playercards'),
+            new moodle_url('/mod/playercards/manage.php', ['id' => $cm->id])
+        );
+    }
+
+    if (has_capability('mod/playercards:viewreports', $cm->context)) {
+        $node->add(
+            get_string('attemptsreportnav', 'mod_playercards'),
+            new moodle_url('/mod/playercards/attemptsreport.php', ['id' => $cm->id])
+        );
+    }
+}
