@@ -30,6 +30,7 @@ use core_privacy\local\request\approved_contextlist;
 use core_privacy\local\request\approved_userlist;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
+use mod_playercards\local\intro_service;
 
 /**
  * Tests for the Privacy API provider.
@@ -238,6 +239,41 @@ final class provider_test extends \core_privacy\tests\provider_testcase {
         $this->assertContains('playercards_decks', $keys);
         $this->assertContains('playercards_deck_cards', $keys);
         $this->assertContains('playercards_attempts', $keys);
+        $this->assertContains(intro_service::get_preference_name(), $keys);
+    }
+
+    /**
+     * A user who never had the intro preference set exports no preference data.
+     *
+     * @return void
+     */
+    public function test_export_user_preferences_no_pref(): void {
+        $user = $this->getDataGenerator()->create_user();
+
+        provider::export_user_preferences($user->id);
+
+        $writer = writer::with_context(\context_system::instance());
+        $this->assertFalse($writer->has_any_data());
+    }
+
+    /**
+     * A user who has seen the intro exports exactly that one preference, under the
+     * mod_playercards component.
+     *
+     * @return void
+     */
+    public function test_export_user_preferences_seen(): void {
+        $user = $this->getDataGenerator()->create_user();
+        intro_service::mark_intro_seen((int) $user->id);
+
+        provider::export_user_preferences($user->id);
+
+        $writer = writer::with_context(\context_system::instance());
+        $this->assertTrue($writer->has_any_data());
+
+        $prefs = (array) $writer->get_user_preferences('mod_playercards');
+        $this->assertCount(1, $prefs);
+        $this->assertArrayHasKey(intro_service::get_preference_name(), $prefs);
     }
 
     /**

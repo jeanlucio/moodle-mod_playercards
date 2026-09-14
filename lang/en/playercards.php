@@ -187,6 +187,7 @@ $string['privacy:metadata:playercards_questions:answers'] = 'The answer options 
 $string['privacy:metadata:playercards_questions:category'] = 'The free-form category label the teacher set for this item.';
 $string['privacy:metadata:playercards_questions:qtype'] = 'The item type: multiple choice, true/false, or description.';
 $string['privacy:metadata:playercards_questions:questiontext'] = 'The question or informational text.';
+$string['privacy:metadata:preference:seenintro'] = 'Whether the automatic how-to-play introduction has already been shown.';
 $string['privacy:metadata:quantity'] = 'The number of copies of this card.';
 $string['privacy:metadata:timecreated'] = 'The time at which this record was created.';
 $string['privacy:metadata:timemodified'] = 'The time at which this record was last modified.';

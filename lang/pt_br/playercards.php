@@ -187,6 +187,7 @@ $string['privacy:metadata:playercards_questions:answers'] = 'As opções de resp
 $string['privacy:metadata:playercards_questions:category'] = 'O rótulo de categoria de texto livre definido pelo professor para este item.';
 $string['privacy:metadata:playercards_questions:qtype'] = 'O tipo do item: múltipla escolha, verdadeiro/falso ou descrição.';
 $string['privacy:metadata:playercards_questions:questiontext'] = 'O texto da pergunta ou informativo.';
+$string['privacy:metadata:preference:seenintro'] = 'Se a introdução automática de como jogar já foi exibida.';
 $string['privacy:metadata:quantity'] = 'O número de cópias desta carta.';
 $string['privacy:metadata:timecreated'] = 'O momento em que este registro foi criado.';
 $string['privacy:metadata:timemodified'] = 'O momento em que este registro foi modificado pela última vez.';
