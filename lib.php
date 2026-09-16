@@ -313,6 +313,15 @@ function playercards_delete_instance(int $id): bool {
 }
 
 /**
+ * Tells Moodle this plugin uses a branded icon (disables purpose recolour filter).
+ *
+ * @return bool True, since this plugin's icon should keep its own colours.
+ */
+function mod_playercards_is_branded(): bool {
+    return true;
+}
+
+/**
  * Returns the features this module supports.
  *
  * @param string $feature FEATURE_xx constant for the requested feature.
