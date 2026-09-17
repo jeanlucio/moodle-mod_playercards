@@ -103,6 +103,7 @@
 /* ---------- Main board (Etapa 3 identity) ---------- */
 
 .path-mod-playercards .playercards-board-main {
+    max-width: 30rem;
     background:
         radial-gradient(
             120% 90% at 50% 0%,
