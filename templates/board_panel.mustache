@@ -45,6 +45,8 @@
         "activeplayerlabel": "Your turn",
         "humanlp": 10000,
         "ailp": 10000,
+        "humanlppercent": 100,
+        "ailppercent": 100,
         "aihandcount": 5,
         "humandeckcount": 35,
         "aideckcount": 20,
@@ -59,6 +61,7 @@
             {"index": 0, "occupied": false},
             {
                 "index": 1, "occupied": true, "name": "Golem de Aço", "atk": 400, "def": 1200,
+                "atkactive": false, "defactive": true,
                 "posturelabel": "Attack posture", "sicklabel": ""
             }
         ],
@@ -66,6 +69,7 @@
             {"index": 0, "occupied": false},
             {
                 "index": 1, "occupied": true, "name": "Sentinela Novata", "atk": 400, "def": 0,
+                "atkactive": false, "defactive": true,
                 "posturelabel": "Defense posture", "sicklabel": "Summoned this turn"
             }
         ],
@@ -131,8 +135,18 @@
             <span class="playercards-activeplayer">{{activeplayerlabel}}</span>
         </div>
         <div class="playercards-lp-row">
-            <span class="playercards-lp playercards-lp-ai">{{#str}} lifepoints, mod_playercards {{/str}}: {{ailp}}</span>
-            <span class="playercards-lp playercards-lp-human">{{#str}} lifepoints, mod_playercards {{/str}}: {{humanlp}}</span>
+            <div class="playercards-lp playercards-lp-ai">
+                <span class="playercards-lp-label">{{#str}} lifepoints, mod_playercards {{/str}}: {{ailp}}</span>
+                <div class="playercards-lp-track">
+                    <div class="playercards-lp-fill" style="--playercards-lp-pct: {{ailppercent}}%"></div>
+                </div>
+            </div>
+            <div class="playercards-lp playercards-lp-human">
+                <span class="playercards-lp-label">{{#str}} lifepoints, mod_playercards {{/str}}: {{humanlp}}</span>
+                <div class="playercards-lp-track">
+                    <div class="playercards-lp-fill" style="--playercards-lp-pct: {{humanlppercent}}%"></div>
+                </div>
+            </div>
         </div>
 
         {{#finished}}
@@ -154,7 +168,7 @@
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
                 {{#ailoreslots}}
                     <div
-                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        class="playercards-slot {{#occupied}}playercards-slot-lore{{#facedown}} playercards-slot-facedown{{/facedown}}{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
                         role="listitem"
                         data-zone="ailore"
                         data-slot="{{index}}"
@@ -180,7 +194,10 @@
                     >
                         {{#occupied}}
                             <div class="playercards-card-name">{{name}}</div>
-                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
+                            <div class="playercards-card-stats">
+                                <span class="playercards-stat playercards-stat-atk{{#atkactive}} playercards-stat-active{{/atkactive}}">{{atk}}<small>{{#str}} atkabbrev, mod_playercards {{/str}}</small></span>
+                                <span class="playercards-stat playercards-stat-def{{#defactive}} playercards-stat-active{{/defactive}}">{{def}}<small>{{#str}} defabbrev, mod_playercards {{/str}}</small></span>
+                            </div>
                             <div class="playercards-card-posture">{{posturelabel}}</div>
                             {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
                         {{/occupied}}
@@ -213,7 +230,10 @@
                     >
                         {{#occupied}}
                             <div class="playercards-card-name">{{name}}</div>
-                            <div class="playercards-card-stats">ATK {{atk}} / DEF {{def}}</div>
+                            <div class="playercards-card-stats">
+                                <span class="playercards-stat playercards-stat-atk{{#atkactive}} playercards-stat-active{{/atkactive}}">{{atk}}<small>{{#str}} atkabbrev, mod_playercards {{/str}}</small></span>
+                                <span class="playercards-stat playercards-stat-def{{#defactive}} playercards-stat-active{{/defactive}}">{{def}}<small>{{#str}} defabbrev, mod_playercards {{/str}}</small></span>
+                            </div>
                             <div class="playercards-card-posture">{{posturelabel}}</div>
                             {{#sicklabel}}<div class="playercards-card-sick">{{sicklabel}}</div>{{/sicklabel}}
                         {{/occupied}}
@@ -223,7 +243,7 @@
             <div class="playercards-slots" role="list" aria-label="{{#str}} loreslots, mod_playercards {{/str}}">
                 {{#humanloreslots}}
                     <div
-                        class="playercards-slot {{#occupied}}playercards-slot-lore{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
+                        class="playercards-slot {{#occupied}}playercards-slot-lore{{#facedown}} playercards-slot-facedown{{/facedown}}{{/occupied}}{{^occupied}}playercards-slot-empty{{/occupied}}"
                         role="listitem"
                         data-zone="humanlore"
                         data-slot="{{index}}"

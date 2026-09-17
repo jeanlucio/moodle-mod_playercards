@@ -86,6 +86,9 @@ const STRING_REQUESTS = [
 /** @var {number} Guardian level up to which mustering is free (SCOPE.md 4.2). */
 const FREE_MUSTER_MAX_LEVEL = 3;
 
+/** @var {number} Starting/maximum life points per player, fixed in V1 (SCOPE.md 4.8). */
+const STARTING_LIFEPOINTS = 10000;
+
 /**
  * Fixed target kind per known Lore effecttype (mirrors
  * mod_playercards\local\lore_effect_resolver on the server) — only used here to decide
@@ -170,7 +173,10 @@ const hydrateHand = (hand) => hand.map((card) => ({
 
 /**
  * Maps a raw Guardian field zone (5 slots) into the shape the template's slot loop
- * expects, adding the slot's own index.
+ * expects, adding the slot's own index. atkactive/defactive drive the template's stat-size
+ * emphasis (SCOPE.md 17, "Etapa 3 fechada") — the posture's active stat renders larger, but
+ * posturelabel always renders alongside it too, since a size/colour-only cue is not
+ * accessible on its own.
  *
  * @param {Array} zone Raw slot entries from match state.
  * @returns {Array}
@@ -181,6 +187,8 @@ const hydrateFieldZone = (zone) => zone.map((slot, index) => ({
     name: slot.name,
     atk: slot.atk,
     def: slot.def,
+    atkactive: slot.posture === 'attack',
+    defactive: slot.posture !== 'attack',
     posturelabel: slot.posture === 'attack' ? strings.attackposture : strings.defenseposture,
     sicklabel: slot.sick ? strings.summonedthisturn : '',
 }));
@@ -250,6 +258,8 @@ const buildMainContext = (state, turnlabel, promotionlabel, matchendedlabel) => 
     activeplayerlabel: state.activeplayer === 'human' ? strings.yourturn : strings.aiturn,
     humanlp: state.lifepoints.human,
     ailp: state.lifepoints.ai,
+    humanlppercent: Math.max(0, Math.min(100, (state.lifepoints.human / STARTING_LIFEPOINTS) * 100)),
+    ailppercent: Math.max(0, Math.min(100, (state.lifepoints.ai / STARTING_LIFEPOINTS) * 100)),
     aihandcount: state.aihandcount,
     humandeckcount: state.humandeckcount,
     aideckcount: state.aideckcount,

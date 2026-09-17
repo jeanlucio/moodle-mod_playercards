@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<libraries>
+  <library>
+    <location>fonts</location>
+    <name>Cinzel</name>
+    <description>Display typeface used for card names and section headings (Guardian Codex visual identity, SCOPE.md 16 Fase 3.5).</description>
+    <version>google fonts, weight 600 only</version>
+    <license>OFL</license>
+    <licenseversion>1.1</licenseversion>
+    <repository>https://fonts.google.com/specimen/Cinzel</repository>
+    <copyrights>
+      <copyright>2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)</copyright>
+    </copyrights>
+  </library>
+  <library>
+    <location>fonts</location>
+    <name>Archivo</name>
+    <description>Body/UI typeface used for labels and stats (Guardian Codex visual identity, SCOPE.md 16 Fase 3.5).</description>
+    <version>google fonts, weights 400/700 only</version>
+    <license>OFL</license>
+    <licenseversion>1.1</licenseversion>
+    <repository>https://fonts.google.com/specimen/Archivo</repository>
+    <copyrights>
+      <copyright>2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)</copyright>
+    </copyrights>
+  </library>
+</libraries>
