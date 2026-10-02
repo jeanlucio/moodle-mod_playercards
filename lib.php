@@ -171,6 +171,49 @@ function playercards_grade_item_update(stdClass $instance, mixed $grades = null)
 }
 
 /**
+ * Returns when the student submitted the work behind their current grade.
+ *
+ * A match row is only written when the match ends, so its timecreated is the finish time
+ * of the match that produces the grade under the instance's grading method. The average
+ * depends on every match, so it uses the last one (the same rule mod_quiz applies to
+ * averaged attempts). A tie for the highest score resolves to the earliest match, so a
+ * later match with the same score never moves the submission date.
+ *
+ * @param stdClass $instance Activity instance.
+ * @param array $attempts playercards_attempts records for this user, ordered by
+ *  timecreated ASC.
+ * @return int|null Unix timestamp, or null when there are no attempts.
+ */
+function playercards_get_grade_datesubmitted(stdClass $instance, array $attempts): ?int {
+    if (empty($attempts)) {
+        return null;
+    }
+
+    $attempts = array_values($attempts);
+    $grademethod = (int) ($instance->grademethod ?? PLAYERCARDS_GRADE_HIGHEST);
+
+    switch ($grademethod) {
+        case PLAYERCARDS_GRADE_FIRST:
+            $source = $attempts[0];
+            break;
+        case PLAYERCARDS_GRADE_AVERAGE:
+        case PLAYERCARDS_GRADE_LAST:
+            $source = $attempts[count($attempts) - 1];
+            break;
+        case PLAYERCARDS_GRADE_HIGHEST:
+        default:
+            $source = $attempts[0];
+            foreach ($attempts as $attempt) {
+                if ((float) $attempt->score > (float) $source->score) {
+                    $source = $attempt;
+                }
+            }
+    }
+
+    return (int) $source->timecreated;
+}
+
+/**
  * Updates gradebook grades for one or all users of a playercards instance.
  *
  * @param stdClass $instance Activity instance.
@@ -180,7 +223,7 @@ function playercards_grade_item_update(stdClass $instance, mixed $grades = null)
 function playercards_update_grades(stdClass $instance, int $userid = 0): void {
     global $DB;
 
-    $sql = 'SELECT a.id, a.userid, a.score
+    $sql = 'SELECT a.id, a.userid, a.score, a.timecreated
               FROM {playercards_attempts} a
              WHERE a.playercardsid = :instanceid';
     $params = ['instanceid' => $instance->id];
@@ -190,7 +233,9 @@ function playercards_update_grades(stdClass $instance, int $userid = 0): void {
         $params['userid'] = $userid;
     }
 
-    $sql .= ' ORDER BY a.timecreated ASC';
+    // The id tiebreak keeps "first", "last" and the highest-score tie stable when two
+    // matches end within the same second.
+    $sql .= ' ORDER BY a.timecreated ASC, a.id ASC';
     $attempts = $DB->get_records_sql($sql, $params);
 
     if (empty($attempts)) {
@@ -215,6 +260,7 @@ function playercards_update_grades(stdClass $instance, int $userid = 0): void {
         $grade = new stdClass();
         $grade->userid = $uid;
         $grade->rawgrade = playercards_calculate_user_grade($instance, $userattemptlist);
+        $grade->datesubmitted = playercards_get_grade_datesubmitted($instance, $userattemptlist);
         $grades[$uid] = $grade;
     }
 
@@ -270,9 +316,18 @@ function playercards_update_instance(stdClass $data, ?moodleform $mform = null):
 
     $data->id = $data->instance;
     $data->timemodified = time();
+    $old = $DB->get_record('playercards', ['id' => $data->id], 'grademethod', MUST_EXIST);
+    $data->grademethod = $data->grademethod ?? $old->grademethod;
     $result = $DB->update_record('playercards', $data);
 
-    playercards_grade_item_update($data);
+    // Grades already in the gradebook were computed with the old method. Recompute them
+    // now, as quiz_update_instance() does, instead of leaving them stale until each
+    // student plays another match.
+    if ((int) $data->grademethod !== (int) $old->grademethod) {
+        playercards_update_grades($data);
+    } else {
+        playercards_grade_item_update($data);
+    }
 
     return $result;
 }
