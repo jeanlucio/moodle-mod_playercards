@@ -57,6 +57,9 @@ final class maxlength_test extends \advanced_testcase {
      * @param int $column Length of the column.
      */
     public function test_field_has_a_maxlength_rule_that_fits_its_column(string $class, string $field, int $column): void {
+        global $CFG;
+        // The form classes rely on the page that uses them (manage.php) having loaded formslib.
+        require_once($CFG->libdir . '/formslib.php');
         $this->resetAfterTest();
         $this->setAdminUser();
 
