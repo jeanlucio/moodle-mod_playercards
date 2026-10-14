@@ -50,6 +50,7 @@ class edit_question_form extends moodleform {
         $mform->addElement('text', 'category', get_string('questioncategorylabel', 'mod_playercards'));
         $mform->setType('category', PARAM_TEXT);
         $mform->addRule('category', null, 'required', null, 'client');
+        $mform->addRule('category', get_string('maximumchars', '', 100), 'maxlength', 100, 'client');
         $mform->addHelpButton('category', 'questioncategorylabel', 'mod_playercards');
 
         $mform->addElement(

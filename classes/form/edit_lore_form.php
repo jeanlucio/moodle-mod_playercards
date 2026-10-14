@@ -64,6 +64,7 @@ class edit_lore_form extends moodleform {
         $mform->addElement('text', 'effecttype', get_string('loreeffecttype', 'mod_playercards'));
         $mform->setType('effecttype', PARAM_ALPHANUMEXT);
         $mform->addRule('effecttype', null, 'required', null, 'client');
+        $mform->addRule('effecttype', get_string('maximumchars', '', 50), 'maxlength', 50, 'client');
         $mform->addHelpButton('effecttype', 'loreeffecttype', 'mod_playercards');
 
         $mform->addElement('text', 'effectvalue', get_string('loreeffectvalue', 'mod_playercards'), ['size' => 5]);
@@ -101,6 +102,7 @@ class edit_lore_form extends moodleform {
 
         $mform->addElement('text', 'questioncategory', get_string('lorequestioncategory', 'mod_playercards'));
         $mform->setType('questioncategory', PARAM_TEXT);
+        $mform->addRule('questioncategory', get_string('maximumchars', '', 100), 'maxlength', 100, 'client');
         $mform->hideIf('questioncategory', 'subtype', 'eq', 'trap');
         $mform->addHelpButton('questioncategory', 'lorequestioncategory', 'mod_playercards');
 
