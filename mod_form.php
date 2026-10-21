@@ -146,27 +146,32 @@ class mod_playercards_mod_form extends moodleform_mod {
     /**
      * Adds custom completion rules to the Moodle completion section.
      *
+     * The element names carry the form's suffix. The core shows this form on the "Default activity
+     * completion" page with the suffix "_playercards" and drops any custom rule whose name lacks it,
+     * which would also erase the rule from the defaults of every new activity.
+     *
      * @return array
      */
     public function add_completion_rules(): array {
         $mform = $this->_form;
+        $suffix = $this->get_suffix();
 
         $group = [];
-        $group[] = $mform->createElement('checkbox', 'completionwinsenabled', '', '');
-        $group[] = $mform->createElement('text', 'completionwins', '', ['size' => 3]);
+        $group[] = $mform->createElement('checkbox', 'completionwinsenabled' . $suffix, '', '');
+        $group[] = $mform->createElement('text', 'completionwins' . $suffix, '', ['size' => 3]);
         $mform->addGroup(
             $group,
-            'completionwinsgroup',
+            'completionwinsgroup' . $suffix,
             get_string('completionwinsgroup', 'mod_playercards'),
             [' '],
             false
         );
 
-        $mform->setType('completionwins', PARAM_INT);
-        $mform->setDefault('completionwins', 1);
-        $mform->disabledIf('completionwins', 'completionwinsenabled', 'notchecked');
+        $mform->setType('completionwins' . $suffix, PARAM_INT);
+        $mform->setDefault('completionwins' . $suffix, 1);
+        $mform->disabledIf('completionwins' . $suffix, 'completionwinsenabled' . $suffix, 'notchecked');
 
-        return ['completionwinsgroup'];
+        return ['completionwinsgroup' . $suffix];
     }
 
     /**
@@ -176,7 +181,9 @@ class mod_playercards_mod_form extends moodleform_mod {
      * @return bool
      */
     public function completion_rule_enabled($data): bool {
-        return !empty($data['completionwinsenabled']) && (int) $data['completionwins'] > 0;
+        $suffix = $this->get_suffix();
+
+        return !empty($data['completionwinsenabled' . $suffix]) && (int) $data['completionwins' . $suffix] > 0;
     }
 
     /**
@@ -194,8 +201,9 @@ class mod_playercards_mod_form extends moodleform_mod {
             $defaultvalues['questionsource_bank'] = (int) (($source & PLAYERCARDS_QUESTIONSOURCE_BANK) !== 0);
         }
 
-        if (!empty($defaultvalues['completionwins'])) {
-            $defaultvalues['completionwinsenabled'] = 1;
+        $suffix = $this->get_suffix();
+        if (!empty($defaultvalues['completionwins' . $suffix])) {
+            $defaultvalues['completionwinsenabled' . $suffix] = 1;
         }
     }
 
@@ -229,8 +237,9 @@ class mod_playercards_mod_form extends moodleform_mod {
             $errors['hud_retry_cost_qty'] = get_string('error_hud_cost_qty', 'mod_playercards');
         }
 
-        if (!empty($data['completionwinsenabled']) && (int) $data['completionwins'] < 1) {
-            $errors['completionwinsgroup'] = get_string('error_completionwins', 'mod_playercards');
+        $suffix = $this->get_suffix();
+        if (!empty($data['completionwinsenabled' . $suffix]) && (int) $data['completionwins' . $suffix] < 1) {
+            $errors['completionwinsgroup' . $suffix] = get_string('error_completionwins', 'mod_playercards');
         }
 
         return $errors;
