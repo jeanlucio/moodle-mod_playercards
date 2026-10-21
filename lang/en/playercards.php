@@ -211,6 +211,7 @@ $string['questiontype'] = 'Type';
 $string['quiztimerseconds'] = 'Quiz answer timer (seconds)';
 $string['quiztimerseconds_help'] = 'How long the opponent has to answer a Quiz card once activated. 15 to 30 seconds recommended.';
 $string['redrawhand'] = 'Draw new hand';
+$string['resetplayercardsuserdata'] = 'Delete the students\' cards, decks and match history';
 $string['result'] = 'Result';
 $string['resultloss'] = 'Loss';
 $string['resultwin'] = 'Win';

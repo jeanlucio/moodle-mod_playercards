@@ -211,6 +211,7 @@ $string['questiontype'] = 'Tipo';
 $string['quiztimerseconds'] = 'Cronômetro de resposta do Quiz (segundos)';
 $string['quiztimerseconds_help'] = 'Quanto tempo o oponente tem para responder uma carta Quiz depois de ativada. Recomendado entre 15 e 30 segundos.';
 $string['redrawhand'] = 'Comprar mão nova';
+$string['resetplayercardsuserdata'] = 'Excluir as cartas, os decks e o histórico de partidas dos estudantes';
 $string['result'] = 'Resultado';
 $string['resultloss'] = 'Derrota';
 $string['resultwin'] = 'Vitória';

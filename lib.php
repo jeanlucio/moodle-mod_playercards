@@ -368,6 +368,73 @@ function playercards_delete_instance(int $id): bool {
 }
 
 /**
+ * Adds the playercards section to the course reset form.
+ *
+ * @param MoodleQuickForm $mform The course reset form.
+ * @return void
+ */
+function playercards_reset_course_form_definition(MoodleQuickForm $mform): void {
+    $mform->addElement('header', 'playercardsheader', get_string('modulenameplural', 'mod_playercards'));
+    $mform->addElement('advcheckbox', 'reset_playercards_userdata', get_string('resetplayercardsuserdata', 'mod_playercards'));
+}
+
+/**
+ * Returns the default values for the playercards course reset form.
+ *
+ * @param stdClass $course The course being reset.
+ * @return array
+ */
+function playercards_reset_course_form_defaults(stdClass $course): array {
+    return ['reset_playercards_userdata' => 1];
+}
+
+/**
+ * Removes the students' cards, decks and match history from the course's activities when it is reset.
+ *
+ * Core clears the completion and the grades by itself but only asks the activities that define this
+ * function to clear their own data. Left behind, the rows would satisfy the completion rule again and
+ * bring the old grade back for a student enrolled again. What the teacher wrote stays.
+ *
+ * @param stdClass $data Reset form data, must contain courseid.
+ * @return array Status rows for the course reset report.
+ */
+function playercards_reset_userdata(stdClass $data): array {
+    global $DB;
+
+    $status = [];
+    if (empty($data->reset_playercards_userdata)) {
+        return $status;
+    }
+
+    $instances = $DB->get_records('playercards', ['course' => $data->courseid]);
+    if (empty($instances)) {
+        return $status;
+    }
+
+    [$insql, $inparams] = $DB->get_in_or_equal(array_keys($instances), SQL_PARAMS_NAMED, 'pcid');
+    $DB->delete_records_select(
+        'playercards_deck_cards',
+        "deckid IN (SELECT id FROM {playercards_decks} WHERE playercardsid $insql)",
+        $inparams
+    );
+    $DB->delete_records_select('playercards_decks', "playercardsid $insql", $inparams);
+    $DB->delete_records_select('playercards_attempts', "playercardsid $insql", $inparams);
+    $DB->delete_records_select('playercards_ownership', "playercardsid $insql", $inparams);
+
+    foreach ($instances as $instance) {
+        playercards_grade_item_update($instance, 'reset');
+    }
+
+    $status[] = [
+        'component' => get_string('modulenameplural', 'mod_playercards'),
+        'item'      => get_string('resetplayercardsuserdata', 'mod_playercards'),
+        'error'     => false,
+    ];
+
+    return $status;
+}
+
+/**
  * Tells Moodle this plugin uses a branded icon (disables purpose recolour filter).
  *
  * @return bool True, since this plugin's icon should keep its own colours.
